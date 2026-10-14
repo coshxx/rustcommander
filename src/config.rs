@@ -26,10 +26,14 @@ fn file() -> Option<PathBuf> {
 
 impl Config {
     pub fn load() -> Config {
+        file().and_then(|f| std::fs::read_to_string(f).ok()).map(|t| Config::parse(&t)).unwrap_or_default()
+    }
+
+    fn parse(text: &str) -> Config {
         let mut cfg = Config::default();
-        let Some(text) = file().and_then(|f| std::fs::read_to_string(f).ok()) else {
-            return cfg;
-        };
+        // Some editors (and PowerShell 5.1) start UTF-8 files with a byte order mark; it would
+        // otherwise become part of the first key.
+        let text = text.strip_prefix('\u{feff}').unwrap_or(text);
         for line in text.lines() {
             let Some((k, v)) = line.split_once('=') else { continue };
             match k.trim() {
@@ -66,5 +70,20 @@ impl Config {
         }
         let _ = std::fs::create_dir_all(dir);
         let _ = std::fs::write(file, out);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_with_and_without_bom() {
+        for text in ["left=C:\\a\nright=D:\\b\nactive=1\n", "\u{feff}left=C:\\a\nright=D:\\b\nactive=1\n"] {
+            let cfg = Config::parse(text);
+            assert_eq!(cfg.paths[0], Some(PathBuf::from(r"C:\a")));
+            assert_eq!(cfg.paths[1], Some(PathBuf::from(r"D:\b")));
+            assert_eq!(cfg.active, 1);
+        }
     }
 }
