@@ -6,10 +6,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::time::Instant;
 
-use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
-use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
-
 use crate::fsx::{self, Entry, Listing, Loaded, Pending};
+use crate::win::SendHwnd;
 
 pub const WM_APP_LOADED: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 1;
 
@@ -19,8 +17,7 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 #[derive(Clone)]
 pub struct LoadSink {
     pub tx: Sender<Loaded>,
-    /// HWND als Zahl, weil `HWND` nicht `Send` ist.
-    pub hwnd: isize,
+    pub hwnd: SendHwnd,
 }
 
 #[derive(Default)]
@@ -61,14 +58,7 @@ impl Panel {
                 return;
             }
             if sink.tx.send(Loaded { panel: index, id, result }).is_ok() {
-                unsafe {
-                    let _ = PostMessageW(
-                        Some(HWND(sink.hwnd as *mut _)),
-                        WM_APP_LOADED,
-                        WPARAM(0),
-                        LPARAM(0),
-                    );
-                }
+                sink.hwnd.post(WM_APP_LOADED);
             }
         });
     }

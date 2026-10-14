@@ -3,18 +3,9 @@
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, channel};
 
-use windows::Win32::Foundation::{FILETIME, HWND, SYSTEMTIME};
-use windows::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives};
-use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
-use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
-use windows::Win32::System::Environment::ExpandEnvironmentStringsW;
-use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
-use windows::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime};
+use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
-use windows::Win32::UI::Shell::ShellExecuteW;
-use windows::Win32::UI::WindowsAndMessaging::{KillTimer, SW_SHOWNORMAL, SetTimer};
-use windows::Win32::Graphics::Gdi::InvalidateRect;
-use windows::core::{PCWSTR, w};
+use windows::Win32::UI::WindowsAndMessaging::WM_CLOSE;
 
 use crate::config::Config;
 use crate::fsx::{self, Kind, Loaded};
@@ -22,6 +13,7 @@ use crate::gfx::{Canvas, Gfx, rect};
 use crate::panel::{LoadSink, Panel};
 use crate::theme::{Color, DARK, Theme};
 use crate::timing::Timing;
+use crate::win::{self, Drive, SendHwnd};
 
 pub const LOADING_DELAY_MS: u32 = 150;
 const TIMER_LOADING: usize = 1;
@@ -53,11 +45,6 @@ struct LineEdit {
     panel: usize,
     text: Vec<u16>,
     caret: usize,
-}
-
-struct Drive {
-    root: Vec<u16>,
-    kind: u32,
 }
 
 struct DrivePopup {
@@ -119,16 +106,10 @@ fn fmt_date(t: u64) -> String {
     if t == 0 {
         return String::new();
     }
-    let ft = FILETIME { dwLowDateTime: t as u32, dwHighDateTime: (t >> 32) as u32 };
-    let (mut st, mut lt) = (SYSTEMTIME::default(), SYSTEMTIME::default());
-    unsafe {
-        if FileTimeToSystemTime(&ft, &mut st).is_err()
-            || SystemTimeToTzSpecificLocalTime(None, &st, &mut lt).is_err()
-        {
-            return String::new();
-        }
+    match win::local_time(t) {
+        Some(lt) => format!("{:02}.{:02}.{:04}  {:02}:{:02}", lt.wDay, lt.wMonth, lt.wYear, lt.wHour, lt.wMinute),
+        None => String::new(),
     }
-    format!("{:02}.{:02}.{:04}  {:02}:{:02}", lt.wDay, lt.wMonth, lt.wYear, lt.wHour, lt.wMinute)
 }
 
 fn icon(kind: Kind, t: &Theme) -> (u16, Color) {
@@ -156,48 +137,10 @@ fn drive_info(kind: u32) -> (u16, &'static str) {
     }
 }
 
-fn list_drives() -> Vec<Drive> {
-    let mask = unsafe { GetLogicalDrives() };
-    (0..26)
-        .filter(|i| mask & (1 << i) != 0)
-        .map(|i| {
-            let root = vec![b'A' as u16 + i as u16, b':' as u16, b'\\' as u16, 0];
-            let kind = unsafe { GetDriveTypeW(PCWSTR(root.as_ptr())) };
-            Drive { root, kind }
-        })
-        .collect()
-}
-
-fn clipboard_text(hwnd: HWND) -> Option<Vec<u16>> {
-    const CF_UNICODETEXT: u32 = 13;
-    unsafe {
-        OpenClipboard(Some(hwnd)).ok()?;
-        let mut out = None;
-        if let Ok(h) = GetClipboardData(CF_UNICODETEXT) {
-            let hg = windows::Win32::Foundation::HGLOBAL(h.0);
-            let p = GlobalLock(hg) as *const u16;
-            if !p.is_null() {
-                let mut len = 0;
-                while *p.add(len) != 0 {
-                    len += 1;
-                }
-                out = Some(std::slice::from_raw_parts(p, len).to_vec());
-                let _ = GlobalUnlock(hg);
-            }
-        }
-        let _ = CloseClipboard();
-        out
-    }
-}
-
 /// Eingabe aus der Pfadzeile in einen absoluten Pfad wandeln.
 fn parse_path(input: &[u16], base: &std::path::Path) -> Option<PathBuf> {
-    let mut z: Vec<u16> = input.to_vec();
-    z.push(0);
-    let mut buf = vec![0u16; 4096];
-    let n = unsafe { ExpandEnvironmentStringsW(PCWSTR(z.as_ptr()), Some(&mut buf)) } as usize;
-    let expanded = if n > 0 && n <= buf.len() { &buf[..n - 1] } else { input };
-    let mut s = String::from_utf16_lossy(expanded).trim().trim_matches('"').to_string();
+    let expanded = win::expand_env(input);
+    let mut s = String::from_utf16_lossy(&expanded).trim().trim_matches('"').to_string();
     if s.is_empty() {
         return None;
     }
@@ -209,31 +152,10 @@ fn parse_path(input: &[u16], base: &std::path::Path) -> Option<PathBuf> {
     std::path::absolute(p).ok()
 }
 
-fn open_with_shell(path: PathBuf) {
-    // ShellExecute kann bei manchen Handlern spürbar blockieren – nie auf dem UI-Thread.
-    std::thread::spawn(move || unsafe {
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-        let file = fsx::to_wide_z(path.as_os_str());
-        let dir = path.parent().map(|d| fsx::to_wide_z(d.as_os_str()));
-        ShellExecuteW(
-            None,
-            w!("open"),
-            PCWSTR(file.as_ptr()),
-            PCWSTR::null(),
-            dir.as_ref().map_or(PCWSTR::null(), |d| PCWSTR(d.as_ptr())),
-            SW_SHOWNORMAL,
-        );
-    });
-}
-
-fn key_down(vk: VIRTUAL_KEY) -> bool {
-    unsafe { GetKeyState(vk.0 as i32) < 0 }
-}
-
 impl App {
     pub fn new(hwnd: HWND, cfg: &Config, timing: Timing) -> App {
         let (tx, rx) = channel();
-        let sink = LoadSink { tx, hwnd: hwnd.0 as isize };
+        let sink = LoadSink { tx, hwnd: SendHwnd::new(hwnd) };
         // Lade-Threads vor der Grafik-Initialisierung starten, damit beides parallel läuft.
         let mut panels = [Panel::default(), Panel::default()];
         let home = std::env::var_os("USERPROFILE").map(PathBuf::from);
@@ -276,13 +198,11 @@ impl App {
 
     fn nav(&mut self, i: usize, path: PathBuf, select: Option<Box<[u16]>>) {
         self.panels[i].navigate(i, path, select, &self.sink);
-        unsafe { SetTimer(Some(self.hwnd), TIMER_LOADING, LOADING_DELAY_MS + 10, None) };
+        win::set_timer(self.hwnd, TIMER_LOADING, LOADING_DELAY_MS + 10);
     }
 
     fn invalidate(&self) {
-        unsafe {
-            let _ = InvalidateRect(Some(self.hwnd), None, false);
-        }
+        win::invalidate(self.hwnd);
     }
 
     pub fn on_loaded(&mut self) {
@@ -309,9 +229,7 @@ impl App {
     }
 
     pub fn on_timer(&mut self) {
-        unsafe {
-            let _ = KillTimer(Some(self.hwnd), TIMER_LOADING);
-        }
+        win::kill_timer(self.hwnd, TIMER_LOADING);
         self.invalidate();
     }
 
@@ -381,7 +299,7 @@ impl App {
             }
             _ => {
                 if let Some(path) = p.current_path() {
-                    open_with_shell(path);
+                    win::shell_open(path);
                 }
             }
         }
@@ -390,13 +308,13 @@ impl App {
 
     fn arm_timer(&self) {
         if self.panels.iter().any(|p| p.pending.is_some()) {
-            unsafe { SetTimer(Some(self.hwnd), TIMER_LOADING, LOADING_DELAY_MS + 10, None) };
+            win::set_timer(self.hwnd, TIMER_LOADING, LOADING_DELAY_MS + 10);
         }
     }
 
     fn open_drives(&mut self, panel: usize) {
         self.active = panel;
-        let drives = list_drives();
+        let drives = win::drives();
         let cur = self.panels[panel].dir.as_os_str().encode_wide_first();
         let sel = drives.iter().position(|d| Some(fsx::fold(d.root[0])) == cur.map(fsx::fold)).unwrap_or(0);
         self.mode = Mode::Drives(DrivePopup { panel, drives, sel });
@@ -433,7 +351,7 @@ impl App {
 
     /// `true` = verarbeitet.
     pub fn on_key(&mut self, vk: VIRTUAL_KEY) -> bool {
-        let ctrl = key_down(VK_CONTROL);
+        let ctrl = win::key_down(VK_CONTROL);
         let handled = match &mut self.mode {
             Mode::Drives(d) => {
                 match vk {
@@ -464,7 +382,7 @@ impl App {
                     VK_RETURN => self.commit_path_edit(),
                     VK_ESCAPE => self.mode = Mode::Normal,
                     VK_V if ctrl => {
-                        if let Some(clip) = clipboard_text(self.hwnd) {
+                        if let Some(clip) = win::clipboard_text(self.hwnd) {
                             let clip: Vec<u16> = clip.into_iter().filter(|&c| c >= 0x20).collect();
                             let n = clip.len();
                             e.text.splice(e.caret..e.caret, clip);
@@ -665,14 +583,7 @@ impl App {
             self.timing.mark("erster Frame mit Inhalt");
             if self.timing.bench {
                 self.bench_frames();
-                unsafe {
-                    let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
-                        Some(self.hwnd),
-                        windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
-                        Default::default(),
-                        Default::default(),
-                    );
-                }
+                SendHwnd::new(self.hwnd).post(WM_CLOSE);
             }
         }
     }

@@ -128,8 +128,16 @@ impl Gfx {
     }
 
     pub fn ensure_target(&mut self, hwnd: HWND) -> Result<()> {
-        if self.target.is_some() {
-            return Ok(());
+        if let Some((t, _)) = &self.target {
+            // Selbstheilend, falls ein WM_SIZE verloren ging.
+            let want = Self::client_size(hwnd);
+            let have = unsafe { t.GetPixelSize() };
+            if have.width != want.width || have.height != want.height {
+                self.resize(hwnd);
+            }
+            if self.target.is_some() {
+                return Ok(());
+            }
         }
         unsafe {
             let mut props = D2D1_RENDER_TARGET_PROPERTIES { dpiX: self.dpi, dpiY: self.dpi, ..Default::default() };

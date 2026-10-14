@@ -7,6 +7,9 @@ mod gfx;
 mod panel;
 mod theme;
 mod timing;
+mod win;
+
+use std::cell::{Cell, UnsafeCell};
 
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
@@ -52,21 +55,61 @@ fn main() {
     let hwnd = create_window();
     timing.mark("Fenster erzeugt");
 
-    let app = Box::into_raw(Box::new(App::new(hwnd, &cfg, timing)));
-    unsafe {
-        (*app).gfx.set_dpi(GetDpiForWindow(hwnd) as f32);
-        SetWindowLongPtrW(hwnd, GWLP_USERDATA, app as isize);
-        (*app).timing.mark("vor ShowWindow");
-        show_window(hwnd, &cfg);
-        (*app).timing.mark("nach ShowWindow");
+    let cell = Box::into_raw(Box::new(AppCell::new(App::new(hwnd, &cfg, timing))));
+    // SAFETY: `cell` stammt aus `Box::into_raw` und wird erst nach der Nachrichtenschleife
+    // freigegeben – dann ist das Fenster zerstört und `wndproc` sieht den Zeiger nie wieder.
+    let cell_ref = unsafe { &*cell };
+    cell_ref.with(|app| {
+        app.gfx.set_dpi(unsafe { GetDpiForWindow(hwnd) } as f32);
+    });
+    unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, cell as isize) };
+    cell_ref.with(|app| app.timing.mark("vor ShowWindow"));
+    show_window(hwnd, &cfg);
+    cell_ref.with(|app| app.timing.mark("nach ShowWindow"));
 
-        let mut msg = MSG::default();
+    let mut msg = MSG::default();
+    unsafe {
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
-        let mut app = Box::from_raw(app);
-        app.timing.flush();
+    }
+    // SAFETY: siehe oben; die Schleife ist beendet, das Fenster zerstört.
+    let cell = unsafe { Box::from_raw(cell) };
+    cell.with(|app| app.timing.flush());
+}
+
+/// Die App hinter einer Sperre. Win32 stellt manche Nachrichten synchron zu, während wir
+/// noch in einem Handler stecken (Dialoge, `SetWindowPos`, `DestroyWindow`, modale Schleifen).
+/// Ohne Sperre entstünden dabei zwei `&mut App` gleichzeitig – undefiniertes Verhalten.
+/// So wird der verschachtelte Zugriff erkannt: im Debug-Build Panic (Fehler finden),
+/// im Release wird die Nachricht an `DefWindowProcW` durchgereicht.
+struct AppCell {
+    busy: Cell<bool>,
+    app: UnsafeCell<App>,
+}
+
+impl AppCell {
+    fn new(app: App) -> AppCell {
+        AppCell { busy: Cell::new(false), app: UnsafeCell::new(app) }
+    }
+
+    /// `None`, wenn die App gerade schon benutzt wird.
+    fn with<R>(&self, f: impl FnOnce(&mut App) -> R) -> Option<R> {
+        if self.busy.replace(true) {
+            debug_assert!(false, "verschachtelter Zugriff auf App (Reentranz in wndproc)");
+            return None;
+        }
+        struct Release<'a>(&'a Cell<bool>);
+        impl Drop for Release<'_> {
+            fn drop(&mut self) {
+                self.0.set(false);
+            }
+        }
+        let _release = Release(&self.busy);
+        // SAFETY: `busy` stellt sicher, dass keine zweite Referenz existiert; `AppCell`
+        // ist nicht `Sync`, also greift nur der UI-Thread zu.
+        Some(f(unsafe { &mut *self.app.get() }))
     }
 }
 
@@ -150,35 +193,40 @@ fn mouse_dips(app: &App, lp: LPARAM) -> (f32, f32) {
 }
 
 extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-    unsafe {
-        let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut App;
-        if ptr.is_null() {
-            return DefWindowProcW(hwnd, msg, wp, lp);
+    let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *const AppCell;
+    if ptr.is_null() {
+        return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
+    }
+    // SAFETY: siehe `main` – der Zeiger lebt, solange das Fenster existiert.
+    let cell = unsafe { &*ptr };
+    let default = || unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
+    let done = |handled: Option<bool>| if handled == Some(true) { LRESULT(0) } else { default() };
+
+    match msg {
+        WM_PAINT => {
+            // BeginPaint/EndPaint immer, sonst kommt WM_PAINT endlos wieder.
+            let mut ps = PAINTSTRUCT::default();
+            unsafe { BeginPaint(hwnd, &mut ps) };
+            cell.with(|app| app.paint());
+            let _ = unsafe { EndPaint(hwnd, &ps) };
+            LRESULT(0)
         }
-        // Achtung: Aufrufe, die synchron neue Nachrichten auslösen (SetWindowPos,
-        // DestroyWindow), passieren erst, nachdem die `&mut App`-Referenz nicht mehr lebt.
-        match msg {
-            WM_PAINT => {
-                let mut ps = PAINTSTRUCT::default();
-                BeginPaint(hwnd, &mut ps);
-                (*ptr).paint();
-                let _ = EndPaint(hwnd, &ps);
-                LRESULT(0)
-            }
-            WM_ERASEBKGND => {
-                // Sobald wir selbst zeichnen können, nicht mehr von GDI übermalen lassen.
-                LRESULT(1)
-            }
-            WM_SIZE => {
-                let app = &mut *ptr;
+        // Wir zeichnen alles selbst; GDI soll nicht übermalen.
+        WM_ERASEBKGND => LRESULT(1),
+        WM_SIZE => {
+            cell.with(|app| {
                 app.gfx.resize(hwnd);
                 app.layout();
-                LRESULT(0)
-            }
-            WM_DPICHANGED => {
-                (*ptr).gfx.set_dpi((wp.0 & 0xffff) as f32);
-                let r = &*(lp.0 as *const RECT);
-                let _ = SetWindowPos(
+            });
+            LRESULT(0)
+        }
+        WM_DPICHANGED => {
+            cell.with(|app| app.gfx.set_dpi((wp.0 & 0xffff) as f32));
+            // SAFETY: Bei WM_DPICHANGED zeigt lParam laut API auf das vorgeschlagene RECT.
+            let r = unsafe { *(lp.0 as *const RECT) };
+            // Löst synchron WM_SIZE aus – daher außerhalb von `with`.
+            let _ = unsafe {
+                SetWindowPos(
                     hwnd,
                     None,
                     r.left,
@@ -186,71 +234,56 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
                     r.right - r.left,
                     r.bottom - r.top,
                     SWP_NOZORDER | SWP_NOACTIVATE,
-                );
-                LRESULT(0)
-            }
-            WM_KEYDOWN => {
-                if (*ptr).on_key(VIRTUAL_KEY(wp.0 as u16)) {
-                    LRESULT(0)
-                } else {
-                    DefWindowProcW(hwnd, msg, wp, lp)
-                }
-            }
-            WM_SYSKEYDOWN => {
-                if (*ptr).on_syskey(VIRTUAL_KEY(wp.0 as u16)) {
-                    LRESULT(0)
-                } else {
-                    DefWindowProcW(hwnd, msg, wp, lp)
-                }
-            }
-            WM_SYSCOMMAND if (wp.0 & 0xfff0) as u32 == SC_KEYMENU && lp.0 == 0 => {
-                // Alt alleine soll nicht ins (nicht vorhandene) Menü springen.
-                LRESULT(0)
-            }
-            WM_CHAR => {
-                (*ptr).on_char(wp.0 as u16);
-                LRESULT(0)
-            }
-            WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => {
-                let _ = SetFocus(Some(hwnd));
-                let app = &mut *ptr;
+                )
+            };
+            LRESULT(0)
+        }
+        WM_KEYDOWN => done(cell.with(|app| app.on_key(VIRTUAL_KEY(wp.0 as u16)))),
+        WM_SYSKEYDOWN => done(cell.with(|app| app.on_syskey(VIRTUAL_KEY(wp.0 as u16)))),
+        // Alt alleine soll nicht ins (nicht vorhandene) Menü springen.
+        WM_SYSCOMMAND if (wp.0 & 0xfff0) as u32 == SC_KEYMENU && lp.0 == 0 => LRESULT(0),
+        WM_CHAR => done(cell.with(|app| {
+            app.on_char(wp.0 as u16);
+            true
+        })),
+        WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => {
+            let _ = unsafe { SetFocus(Some(hwnd)) };
+            done(cell.with(|app| {
                 let (x, y) = mouse_dips(app, lp);
                 app.on_click(x, y, msg == WM_LBUTTONDBLCLK);
-                LRESULT(0)
-            }
-            WM_MOUSEWHEEL => {
-                let mut pt = POINT {
-                    x: (lp.0 & 0xffff) as i16 as i32,
-                    y: ((lp.0 >> 16) & 0xffff) as i16 as i32,
-                };
-                let _ = ScreenToClient(hwnd, &mut pt);
-                let app = &mut *ptr;
-                app.on_wheel(pt.x as f32 * 96.0 / app.gfx.dpi, ((wp.0 >> 16) & 0xffff) as i16);
-                LRESULT(0)
-            }
-            panel::WM_APP_LOADED => {
-                (*ptr).on_loaded();
-                LRESULT(0)
-            }
-            WM_TIMER => {
-                (*ptr).on_timer();
-                LRESULT(0)
-            }
-            WM_CLOSE => {
-                {
-                    let app = &mut *ptr;
-                    if !app.timing.bench {
-                        app.config(hwnd).save();
-                    }
-                }
-                let _ = DestroyWindow(hwnd);
-                LRESULT(0)
-            }
-            WM_DESTROY => {
-                PostQuitMessage(0);
-                LRESULT(0)
-            }
-            _ => DefWindowProcW(hwnd, msg, wp, lp),
+                true
+            }))
         }
+        WM_MOUSEWHEEL => {
+            let mut pt = POINT { x: (lp.0 & 0xffff) as i16 as i32, y: ((lp.0 >> 16) & 0xffff) as i16 as i32 };
+            let _ = unsafe { ScreenToClient(hwnd, &mut pt) };
+            done(cell.with(|app| {
+                app.on_wheel(pt.x as f32 * 96.0 / app.gfx.dpi, ((wp.0 >> 16) & 0xffff) as i16);
+                true
+            }))
+        }
+        panel::WM_APP_LOADED => {
+            cell.with(|app| app.on_loaded());
+            LRESULT(0)
+        }
+        WM_TIMER => {
+            cell.with(|app| app.on_timer());
+            LRESULT(0)
+        }
+        WM_CLOSE => {
+            cell.with(|app| {
+                if !app.timing.bench {
+                    app.config(hwnd).save();
+                }
+            });
+            // Löst synchron WM_DESTROY aus – daher außerhalb von `with`.
+            let _ = unsafe { DestroyWindow(hwnd) };
+            LRESULT(0)
+        }
+        WM_DESTROY => {
+            unsafe { PostQuitMessage(0) };
+            LRESULT(0)
+        }
+        _ => default(),
     }
 }
