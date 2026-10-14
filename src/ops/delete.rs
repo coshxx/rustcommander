@@ -11,6 +11,7 @@ use windows::core::PCWSTR;
 use super::{Cancelled, MAX_DEPTH, Worker, clear_readonly, error_text, is_reparse};
 use crate::files::names::to_utf16_nul;
 
+/// Count files for the progress display without following links.
 fn count_no_follow(path: &Path, depth: usize, files: &mut u64) {
     let Ok(m) = std::fs::symlink_metadata(path) else { return };
     if m.is_dir() && !is_reparse(&m) {
@@ -27,6 +28,7 @@ fn count_no_follow(path: &Path, depth: usize, files: &mut u64) {
 }
 
 impl Worker {
+    /// Permanently delete `sources` (directories recursively).
     pub(super) fn delete_all(&mut self, sources: &[PathBuf]) -> Result<(), Cancelled> {
         for s in sources {
             count_no_follow(s, 0, &mut self.progress.files_total);
@@ -83,6 +85,7 @@ impl Worker {
         Ok(())
     }
 
+    /// Move `sources` to the recycle bin in one shell call (asks if an item can't be recycled).
     pub(super) fn recycle(&mut self, sources: &[PathBuf]) {
         self.progress.files_total = sources.len() as u64;
         self.post_progress(true);

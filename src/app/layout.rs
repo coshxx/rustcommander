@@ -16,38 +16,48 @@ pub(crate) const ICON_W: f32 = 24.0;
 pub(crate) const CHIP_W: f32 = 40.0;
 const POPUP_W: f32 = 230.0;
 pub(crate) const CARD_W: f32 = 400.0;
-
 /// Width of the scrollbar's mouse zone at the panel's right edge.
 const SCROLL_ZONE_W: f32 = 14.0;
 const THUMB_MIN_H: f32 = 24.0;
 
+/// What is under the mouse.
 pub(crate) enum Hit {
+    /// Drive chip of a panel.
     Drive(usize),
+    /// Path bar of a panel.
     Path(usize),
+    /// (panel, entry index)
     Row(usize, usize),
     Scrollbar(usize),
+    /// Somewhere else in a panel (e.g. below the last entry).
     Panel(usize),
+    /// Entry of the drive popup.
     Popup(usize),
     Nothing,
 }
 
+/// Scrollbar geometry of one panel (DIPs).
 pub(crate) struct ScrollBar {
+    /// Mouse-sensitive strip at the right edge of the list.
     zone: Rect,
     pub(crate) thumb_y: f32,
     pub(crate) thumb_h: f32,
 }
 
 impl App {
+    /// Left edge and width of panel `i` in a window `w` DIPs wide.
     pub(crate) fn panel_x(&self, i: usize, w: f32) -> (f32, f32) {
         let half = (w / 2.0).floor();
         if i == 0 { (0.0, half) } else { (half + 1.0, w - half - 1.0) }
     }
 
+    /// Top and height of the file list area in a window `h` DIPs high.
     pub(crate) fn list_area(h: f32) -> (f32, f32) {
         let top = PATH_H + COLS_H;
         (top, (h - KEYBAR_H - STATUS_H - top).max(0.0))
     }
 
+    /// After a resize: rows per page; keeps the scroll position valid.
     pub fn layout(&mut self) {
         let (_, h) = self.gfx.size_dips(self.hwnd);
         let rows = (Self::list_area(h).1 / ROW_H).floor().max(1.0) as usize;
@@ -58,6 +68,7 @@ impl App {
         }
     }
 
+    /// What is at (`x`, `y`).
     pub(crate) fn hit(&self, x: f32, y: f32) -> Hit {
         let (w, h) = self.gfx.size_dips(self.hwnd);
         if let Mode::Drives(d) = &self.mode {
@@ -101,6 +112,7 @@ impl App {
         Some(ScrollBar { zone: rect(x + pw - SCROLL_ZONE_W, top, SCROLL_ZONE_W, lh), thumb_y, thumb_h })
     }
 
+    /// Drive popup below the drive chip of a panel at `px`.
     pub(crate) fn popup_rect(&self, px: f32, n: usize) -> Rect {
         rect(px + PAD - 4.0, PATH_H - 2.0, POPUP_W, n as f32 * ROW_H + 8.0)
     }

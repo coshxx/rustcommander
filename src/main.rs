@@ -1,3 +1,8 @@
+//! RustCommander: a fast dual-pane file manager for Windows.
+//!
+//! Startup: parse arguments, load the config, create the window, start the message loop.
+//! See ARCHITECTURE.md for how the modules fit together.
+
 #![windows_subsystem = "windows"]
 
 mod app;

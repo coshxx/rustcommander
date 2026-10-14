@@ -23,9 +23,10 @@ the steady-state frame time).
 - Only visible rows are drawn.
 - **Direct2D in software mode** (default). Measured: the hardware render target costs ~150 ms at
   startup (loading D3D + GPU driver) and doesn't draw faster. `RC_HARDWARE=1` switches for comparison.
-- `unsafe` lives only in the OS boundary modules (`win.rs`, `gfx.rs`, `fsx.rs`, `main.rs`,
-  `timing.rs`). App logic (`app.rs`, `panel.rs`) is free of `unsafe`. The window procedure guards
-  the app against reentrant access (`AppCell`).
+- `unsafe` lives only in the OS boundary modules (`main.rs`, `window.rs`, `sys/`, `files/listing.rs`,
+  `files/watch.rs`, `ops/`, `timing.rs`). App logic (`app/`, `ui/`, `panel.rs`) is free of `unsafe`.
+  The window procedure guards the app against reentrant access (`AppCell`).
+- Code structure: see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ### Measurements v0.1 (release build, 120 dpi)
 

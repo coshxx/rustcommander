@@ -10,6 +10,7 @@ use crate::app::layout::{CARD_W, ICON_W, KEYBAR_H, ROW_H, STATUS_H};
 use crate::app::{App, Tone};
 use crate::sys::gfx::{Canvas, rect};
 
+/// Icon and label for a drive type (`GetDriveTypeW`).
 fn drive_info(kind: u32) -> (u16, &'static str) {
     match kind {
         2 => (0xE88E, "Wechseldatenträger"),

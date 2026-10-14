@@ -11,6 +11,7 @@ use super::{Cancelled, MAX_DEPTH, Worker, clear_readonly, error_text, is_reparse
 use crate::files::names::to_utf16_nul;
 
 impl Worker {
+    /// Move one item; `fast` = same volume, so a rename is tried first.
     pub(super) fn move_item(&mut self, src: &Path, dst: &Path, fast: bool) -> Result<(), Cancelled> {
         self.check()?;
         self.progress.current = src.to_path_buf();
@@ -52,6 +53,7 @@ impl Worker {
         self.rename_or_cross(src, dst, MOVE_FILE_FLAGS(0), fast)
     }
 
+    /// Rename if possible, otherwise (other volume) copy and delete.
     fn rename_or_cross(&mut self, src: &Path, dst: &Path, flags: MOVE_FILE_FLAGS, fast: bool) -> Result<(), Cancelled> {
         let (s, d) = (to_utf16_nul(src.as_os_str()), to_utf16_nul(dst.as_os_str()));
         match unsafe { MoveFileExW(PCWSTR(s.as_ptr()), PCWSTR(d.as_ptr()), flags) } {

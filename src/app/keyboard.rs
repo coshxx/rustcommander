@@ -181,6 +181,7 @@ impl App {
         true
     }
 
+    /// Alt+F1 / Alt+F2: drive popup for the left / right panel.
     pub fn on_syskey(&mut self, vk: VIRTUAL_KEY) -> bool {
         if !matches!(self.mode, Mode::Normal | Mode::Drives(_)) {
             return false;
@@ -195,6 +196,7 @@ impl App {
         true
     }
 
+    /// Typed characters: quick search, text inputs, drive letters, conflict answers.
     pub fn on_char(&mut self, c: u16) {
         if std::mem::take(&mut self.swallow_next_char) {
             return;

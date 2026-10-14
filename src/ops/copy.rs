@@ -41,6 +41,7 @@ unsafe extern "system" fn copy_progress(
 }
 
 impl Worker {
+    /// Copy a file or a whole directory tree (links inside are not followed).
     pub(super) fn copy_tree(&mut self, src: &Path, dst: &Path, depth: usize) -> Result<(), Cancelled> {
         self.check()?;
         let m = match std::fs::metadata(src) {
@@ -117,6 +118,7 @@ impl Worker {
         Ok(ok)
     }
 
+    /// Count a skipped file as done for the progress display.
     fn skip_file(&mut self, len: u64) {
         self.progress.bytes_done += len;
         self.progress.files_done += 1;

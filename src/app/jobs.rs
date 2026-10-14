@@ -20,6 +20,7 @@ pub(crate) struct RunningJob {
 }
 
 impl App {
+    /// Start a file operation; the progress card appears after `JOB_CARD_DELAY_MS`.
     pub(crate) fn start_job(&mut self, job: Job, title: &'static str, source_panel: usize) {
         let handle = ops::start(job, Some((SendHwnd::new(self.hwnd), WM_APP_JOB)));
         self.job = Some(RunningJob {
@@ -33,6 +34,7 @@ impl App {
         win::set_timer(self.hwnd, TIMER_JOB, JOB_CARD_DELAY_MS + 10);
     }
 
+    /// `WM_APP_JOB`: process everything the worker sent.
     pub fn on_job_event(&mut self) {
         while let Some(job) = &mut self.job
             && let Ok(ev) = job.handle.events.try_recv()
@@ -50,6 +52,7 @@ impl App {
         self.invalidate();
     }
 
+    /// Show the result, clear marks on success and refresh both panels.
     fn finish_job(&mut self, job: RunningJob, s: ops::Summary) {
         if matches!(self.mode, Mode::Conflict(_)) {
             self.mode = Mode::Normal;
@@ -84,6 +87,7 @@ impl App {
         }
     }
 
+    /// Pass the user's choice in the conflict question to the worker.
     pub(crate) fn answer_conflict(&mut self, a: Answer) {
         if let Some(job) = &self.job {
             job.handle.answer(a);

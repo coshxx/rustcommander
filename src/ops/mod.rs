@@ -71,11 +71,13 @@ pub struct Handle {
 }
 
 impl Handle {
+    /// Stop the job as soon as possible (also mid-file).
     pub fn cancel(&self) {
         self.cancel.store(true, Ordering::Relaxed);
         let _ = self.answers.send(Answer::Cancel);
     }
 
+    /// Answer the pending `Event::Conflict`.
     pub fn answer(&self, a: Answer) {
         if a == Answer::Cancel {
             self.cancel();
@@ -122,10 +124,12 @@ struct Worker {
     summary: Summary,
 }
 
+/// Junction or symbolic link: never followed when deleting or moving across volumes.
 fn is_reparse(m: &std::fs::Metadata) -> bool {
     m.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
 }
 
+/// Both paths on the same drive letter / volume (a move is then a cheap rename).
 fn same_volume(a: &Path, b: &Path) -> bool {
     let root = |p: &Path| match p.components().next() {
         Some(Component::Prefix(px)) => Some(px.as_os_str().to_ascii_lowercase()),
@@ -134,6 +138,7 @@ fn same_volume(a: &Path, b: &Path) -> bool {
     root(a).is_some() && root(a) == root(b)
 }
 
+/// OS error message without the trailing "(os error N)".
 fn error_text(e: &std::io::Error) -> String {
     match e.raw_os_error() {
         Some(code) => windows::core::Error::from_hresult(windows::core::HRESULT::from_win32(code as u32))
@@ -162,6 +167,7 @@ fn scan(path: &Path, depth: usize, files: &mut u64, bytes: &mut u64) {
     }
 }
 
+/// Remove the read-only attribute so the file can be overwritten or deleted.
 fn clear_readonly(path: &Path) {
     if let Ok(m) = std::fs::symlink_metadata(path) {
         let mut p = m.permissions();
@@ -173,11 +179,13 @@ fn clear_readonly(path: &Path) {
     }
 }
 
+/// Rename that only changes the case (`a.txt` → `A.txt`).
 fn same_name_ignoring_case(a: &Path, b: &Path) -> bool {
     a.as_os_str().eq_ignore_ascii_case(b.as_os_str())
 }
 
 impl Worker {
+    /// Send an event to the UI and wake it up.
     fn send(&self, ev: Event) {
         if self.events.send(ev).is_ok()
             && let Some((hwnd, msg)) = self.notify
@@ -186,6 +194,7 @@ impl Worker {
         }
     }
 
+    /// Report progress, at most every few milliseconds unless `force`.
     fn post_progress(&mut self, force: bool) {
         if force || self.last_post.elapsed() >= Duration::from_millis(40) {
             self.last_post = Instant::now();
@@ -193,10 +202,12 @@ impl Worker {
         }
     }
 
+    /// `Err(Cancelled)` once the UI asked to cancel.
     fn check(&self) -> Result<(), Cancelled> {
         if self.cancel.load(Ordering::Relaxed) { Err(Cancelled) } else { Ok(()) }
     }
 
+    /// Remember a failure for the summary and carry on with the next item.
     fn error(&mut self, path: &Path, msg: impl AsRef<str>) {
         self.summary.errors.push(format!("{}: {}", path.display(), msg.as_ref()));
     }
@@ -225,6 +236,7 @@ impl Worker {
         }
     }
 
+    /// Execute the whole job and send `Event::Done` with the summary.
     fn run(&mut self, job: Job) {
         let result = match job {
             Job::Copy { sources, dest } => self.transfer(&sources, &dest, false),
@@ -273,6 +285,7 @@ impl Worker {
         if into || dest.is_dir() { src.file_name().map(|n| dest.join(n)) } else { Some(dest.to_path_buf()) }
     }
 
+    /// Copy or move `sources` to `dest`. A trailing `\` or several sources mean "into `dest`".
     fn transfer(&mut self, sources: &[PathBuf], dest: &Path, is_move: bool) -> Result<(), Cancelled> {
         // Several sources, or a destination ending in `\`, always mean "into this directory".
         let ends_with_sep = dest.as_os_str().to_string_lossy().ends_with(['\\', '/']);

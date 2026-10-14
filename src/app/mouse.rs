@@ -93,6 +93,7 @@ impl App {
         }
     }
 
+    /// Update an ongoing drag, or the scrollbar hover state.
     pub fn on_mouse_move(&mut self, x: f32, y: f32) {
         match &mut self.drag {
             Some(Drag::Thumb { panel, grab }) => {
@@ -123,12 +124,14 @@ impl App {
         }
     }
 
+    /// `WM_MOUSELEAVE`: no scrollbar is hovered anymore.
     pub fn on_mouse_leave(&mut self) {
         if self.hover_bar.take().is_some() {
             self.invalidate();
         }
     }
 
+    /// Start `TIMER_DRAG` unless it is running already.
     fn arm_drag_timer(&mut self, ms: u32) {
         if !self.drag_timer_armed {
             win::set_timer(self.hwnd, TIMER_DRAG, ms);
@@ -136,6 +139,7 @@ impl App {
         }
     }
 
+    /// `TIMER_DRAG`: repeat paging, or scroll and mark while dragging past the list edges.
     pub(crate) fn drag_tick(&mut self) {
         match self.drag {
             Some(Drag::Page { panel, y }) => {
@@ -225,6 +229,7 @@ impl App {
         self.invalidate();
     }
 
+    /// Wheel scrolls the panel under the mouse, three rows per notch; the cursor stays.
     pub fn on_wheel(&mut self, x: f32, delta: i16) {
         let (w, _) = self.gfx.size_dips(self.hwnd);
         let p = if x < self.panel_x(1, w).0 { 0 } else { 1 };

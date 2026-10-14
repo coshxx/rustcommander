@@ -58,6 +58,7 @@ impl AppCell {
     }
 }
 
+/// Register the window class and create the (still hidden) main window.
 pub(crate) fn create_window() -> HWND {
     unsafe {
         let instance = GetModuleHandleW(None).expect("GetModuleHandleW");
@@ -103,6 +104,7 @@ pub(crate) fn create_window() -> HWND {
     }
 }
 
+/// Show the window at the saved position, or centered on first start.
 pub(crate) fn show_window(hwnd: HWND, cfg: &Config) {
     unsafe {
         if let Some((r, max)) = cfg.window {
@@ -123,6 +125,7 @@ pub(crate) fn show_window(hwnd: HWND, cfg: &Config) {
     }
 }
 
+/// Normal (restored) position and maximized state, for saving.
 pub fn window_placement(hwnd: HWND) -> Option<([i32; 4], bool)> {
     let mut wp = WINDOWPLACEMENT { length: size_of::<WINDOWPLACEMENT>() as u32, ..Default::default() };
     unsafe { GetWindowPlacement(hwnd, &mut wp).ok()? };
@@ -133,6 +136,7 @@ pub fn window_placement(hwnd: HWND) -> Option<([i32; 4], bool)> {
 /// Lives in the `Win32_UI_Controls` feature of the `windows` crate; not worth the extra feature.
 pub(crate) const WM_MOUSELEAVE: u32 = 0x02A3;
 
+/// Mouse position from `lParam`, in DIPs.
 pub(crate) fn mouse_dips(app: &App, lp: LPARAM) -> (f32, f32) {
     let x = (lp.0 & 0xffff) as i16 as f32;
     let y = ((lp.0 >> 16) & 0xffff) as i16 as f32;

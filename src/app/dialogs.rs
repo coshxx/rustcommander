@@ -58,6 +58,7 @@ pub(crate) struct Dialog {
 }
 
 impl App {
+    /// Open the drive popup for `panel`, preselecting its current drive.
     pub(crate) fn open_drives(&mut self, panel: usize) {
         self.active = panel;
         let drives = win::drives();
@@ -66,6 +67,7 @@ impl App {
         self.mode = Mode::Drives(DrivePopup { panel, drives, sel });
     }
 
+    /// Switch to the drive at `idx` of the popup (stays put if it is the current drive).
     pub(crate) fn choose_drive(&mut self, idx: usize) {
         if let Mode::Drives(d) = std::mem::replace(&mut self.mode, Mode::Normal)
             && let Some(drive) = d.drives.get(idx)
@@ -78,12 +80,14 @@ impl App {
         }
     }
 
+    /// Make the path bar of `panel` editable (Ctrl+L, click on the path).
     pub(crate) fn start_path_edit(&mut self, panel: usize) {
         self.active = panel;
         let text = utf16(&self.panels[panel].dir.display().to_string());
         self.mode = Mode::PathEdit { panel, input: TextInput::new(text) };
     }
 
+    /// Enter in the path bar: go to the typed path.
     pub(crate) fn commit_path_edit(&mut self) {
         if let Mode::PathEdit { panel, input } = std::mem::replace(&mut self.mode, Mode::Normal)
             && let Some(p) = parse_path(&input.text, &self.panels[panel].dir)
@@ -92,6 +96,7 @@ impl App {
         }
     }
 
+    /// Open a dialog for the marked entries (or the one under the cursor).
     pub(crate) fn open_dialog(&mut self, kind: DialogKind) {
         if self.job.is_some() && !matches!(kind, DialogKind::Select { .. }) {
             self.notify("Es läuft bereits ein Vorgang".into(), Tone::Error);
@@ -146,6 +151,7 @@ impl App {
         self.mode = Mode::Dialog(Dialog { kind, panel: a, sources, message, input });
     }
 
+    /// Enter in a dialog: start the job (or apply the mask).
     pub(crate) fn commit_dialog(&mut self) {
         let Mode::Dialog(d) = std::mem::replace(&mut self.mode, Mode::Normal) else { return };
         let dir = self.panels[d.panel].dir.clone();
@@ -187,6 +193,7 @@ impl App {
         self.start_job(job, d.kind.title(), d.panel);
     }
 
+    /// Mark (`add`) or unmark all entries of `panel` that match `input`.
     fn apply_mask(&mut self, panel: usize, input: String, add: bool) {
         let mask = Mask::parse(&input);
         let n = self.panels[panel].mark_where(add, |e| mask.matches(&e.name, e.is_dir()));

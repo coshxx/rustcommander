@@ -60,6 +60,7 @@ impl App {
         x
     }
 
+    /// Rounded card with shadow (dialogs, popups, notices).
     pub(crate) fn draw_card(&self, c: &Canvas, r: Rect) {
         let t = self.theme;
         let shadow = rect(r.left + 2.0, r.top + 5.0, r.right - r.left, r.bottom - r.top);
@@ -68,6 +69,7 @@ impl App {
         c.stroke_round(r, 10.0, 1.0, t.popup_border);
     }
 
+    /// Bottom row of key hints; hints that don't fit are left out.
     pub(crate) fn draw_keybar(&self, c: &Canvas, w: f32, h: f32) {
         let t = self.theme;
         let y = h - KEYBAR_H;

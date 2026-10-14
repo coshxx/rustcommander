@@ -16,6 +16,7 @@ use crate::sys::win::SendHwnd;
 use crate::ui::widgets::HINTS;
 
 impl App {
+    /// `WM_PAINT`: draw the whole window.
     pub fn paint(&mut self) {
         if !self.painted {
             self.timing.mark("WM_PAINT");

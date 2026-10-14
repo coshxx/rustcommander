@@ -54,6 +54,7 @@ pub enum Applied {
 }
 
 impl Panel {
+    /// Load `path` in the background; `select` = entry to put the cursor on.
     pub fn navigate(&mut self, index: usize, path: PathBuf, select: Option<Box<[u16]>>, sink: &LoadSink) {
         self.start_load(index, path, select, false, sink);
     }
@@ -102,6 +103,7 @@ impl Panel {
         self.search = search;
     }
 
+    /// Parent directory, with the cursor on the directory we came from.
     pub fn go_up(&mut self, index: usize, sink: &LoadSink) {
         if let (Some(parent), Some(name)) = (self.dir.parent(), self.dir.file_name()) {
             let sel = to_utf16_nul(name);
@@ -110,6 +112,7 @@ impl Panel {
         }
     }
 
+    /// Root of the current drive.
     pub fn go_root(&mut self, index: usize, sink: &LoadSink) {
         if let Some(root) = self.dir.ancestors().last()
             && root != self.dir
@@ -172,6 +175,7 @@ impl Panel {
 
     // ---------- marks ----------
 
+    /// Toggle the mark of the entry under the cursor (`..` is never marked).
     pub fn toggle_mark(&mut self) {
         if let Some(e) = self.entries.get_mut(self.cursor)
             && e.kind != Kind::Parent
@@ -240,6 +244,7 @@ impl Panel {
         }
     }
 
+    /// Entry under the cursor.
     pub fn current(&self) -> Option<&Entry> {
         self.entries.get(self.cursor)
     }
@@ -248,6 +253,7 @@ impl Panel {
         self.current().map(|e| self.dir.join(e.os_name()))
     }
 
+    /// Put the cursor on entry `i` (clamped) and scroll it into view.
     pub fn set_cursor(&mut self, i: usize) {
         self.cursor = i.min(self.entries.len().saturating_sub(1));
         self.ensure_visible();
@@ -258,10 +264,12 @@ impl Panel {
         self.set_cursor(i);
     }
 
+    /// Rows per page (PgUp/PgDn).
     pub fn page(&self) -> isize {
         self.rows_visible.saturating_sub(1).max(1) as isize
     }
 
+    /// Scroll so the cursor is visible.
     pub fn ensure_visible(&mut self) {
         let rows = self.rows_visible.max(1);
         if self.cursor < self.top {
@@ -272,6 +280,7 @@ impl Panel {
         self.clamp_top();
     }
 
+    /// Scroll the view by `delta` rows; the cursor stays.
     pub fn scroll(&mut self, delta: isize) {
         self.top = (self.top as isize + delta).max(0) as usize;
         self.clamp_top();
@@ -283,6 +292,7 @@ impl Panel {
         self.clamp_top();
     }
 
+    /// Largest possible first visible row.
     pub fn max_top(&self) -> usize {
         self.entries.len().saturating_sub(self.rows_visible.max(1))
     }
@@ -300,6 +310,7 @@ impl Panel {
         }
     }
 
+    /// Quick search: remove the last character.
     pub fn search_pop(&mut self) {
         self.search.pop();
         if !self.search.is_empty() {
@@ -316,10 +327,12 @@ impl Panel {
         hit.is_some()
     }
 
+    /// How long the current load has been running, if any.
     pub fn loading_for_ms(&self) -> Option<u128> {
         self.pending.as_ref().map(|p| p.started.elapsed().as_millis())
     }
 
+    /// The path to show in the path bar: the one being loaded, else the current one.
     pub fn shown_path(&self) -> &Path {
         match &self.pending {
             Some(p) if p.started.elapsed().as_millis() >= crate::app::LOADING_DELAY_MS as u128 => &p.path,

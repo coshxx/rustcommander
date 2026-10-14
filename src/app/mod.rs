@@ -29,33 +29,39 @@ use crate::sys::win::{self, SendHwnd};
 use crate::theme::{DARK, Theme};
 use crate::timing::Timing;
 
+/// Directories that take longer than this show "loading" in the path bar.
 pub const LOADING_DELAY_MS: u32 = 150;
+/// Posted by the file operation worker when it has news (progress, conflict, done).
 pub const WM_APP_JOB: u32 = WM_APP + 2;
+/// Posted by a directory watcher; `wParam` = panel index.
 pub const WM_APP_DIRCHANGED: u32 = WM_APP + 3;
 
+// Timer IDs (`WM_TIMER`).
 const TIMER_LOADING: usize = 1;
 const TIMER_REFRESH: [usize; 2] = [2, 3];
 const TIMER_NOTICE: usize = 4;
 pub(crate) const TIMER_JOB: usize = 5;
-
 /// Auto-repeat while a mouse button is held (track paging, drag-marking at the edges).
 pub(crate) const TIMER_DRAG: usize = 6;
 
 /// Directory change notifications trigger at most one reload per this interval.
 const REFRESH_THROTTLE_MS: u32 = 250;
 
+/// Who gets keyboard and mouse input right now.
 pub(crate) enum Mode {
+    /// The file lists.
     Normal,
-    PathEdit {
-        panel: usize,
-        input: TextInput,
-    },
+    /// Editing the path bar of `panel` (Ctrl+L or click on the path).
+    PathEdit { panel: usize, input: TextInput },
+    /// Drive popup (Alt+F1 / Alt+F2).
     Drives(DrivePopup),
+    /// One of the small dialogs (copy, delete, mark by mask, …).
     Dialog(Dialog),
     /// A running job waits for an answer about this existing target.
     Conflict(PathBuf),
 }
 
+/// Color and icon of a notice.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Tone {
     Success,
@@ -72,18 +78,28 @@ pub struct App {
     pub hwnd: HWND,
     pub gfx: Gfx,
     pub timing: Timing,
+    /// Left and right file list.
     pub(crate) panels: [Panel; 2],
+    /// Index of the panel with the keyboard focus.
     pub(crate) active: usize,
+    /// What keys and clicks currently go to: the file lists, a dialog, a popup …
     pub(crate) mode: Mode,
+    /// Handed to directory loader threads so they can report back.
     pub(crate) sink: LoadSink,
     /// Results from the directory loader threads (see `LoadSink`).
     loaded_rx: Receiver<Loaded>,
     pub(crate) theme: &'static Theme,
+    /// Measured once: widths of the key and label of each key bar hint.
     pub(crate) hint_widths: Option<Vec<(f32, f32)>>,
+    /// The file operation in progress (at most one at a time).
     pub(crate) job: Option<RunningJob>,
+    /// Result message shown for a few seconds after a job.
     pub(crate) notice: Option<Notice>,
+    /// Per panel: a reload after a change notification is already scheduled.
     refresh_armed: [bool; 2],
+    /// Mouse interaction while a button is held.
     pub(crate) drag: Option<Drag>,
+    /// `TIMER_DRAG` is running (auto-repeat while dragging).
     pub(crate) drag_timer_armed: bool,
     /// Panel whose scrollbar is under the mouse.
     pub(crate) hover_bar: Option<usize>,
@@ -91,11 +107,13 @@ pub struct App {
     pub(crate) mask: String,
     /// The key that just opened a dialog also produces a WM_CHAR (e.g. Num+ → '+'): drop it.
     pub(crate) swallow_next_char: bool,
+    /// For `--timing`: the first frame / the first frame with both panels loaded was drawn.
     pub(crate) painted: bool,
     pub(crate) painted_content: bool,
 }
 
 impl App {
+    /// Starts loading both panels right away, before graphics are initialized.
     pub fn new(hwnd: HWND, cfg: &Config, timing: Timing) -> App {
         let (tx, rx) = channel();
         let sink = LoadSink { tx, hwnd: SendHwnd::new(hwnd) };
@@ -136,6 +154,7 @@ impl App {
         app
     }
 
+    /// Current state to save on exit.
     pub fn config(&self, hwnd: HWND) -> Config {
         let mut cfg = Config { active: self.active, mask: Some(self.mask.clone()), ..Default::default() };
         for i in 0..2 {
@@ -147,21 +166,25 @@ impl App {
         cfg
     }
 
+    /// Load `path` into panel `i` and show "loading" if it takes long.
     pub(crate) fn navigate(&mut self, i: usize, path: PathBuf, select: Option<Box<[u16]>>) {
         self.panels[i].navigate(i, path, select, &self.sink);
         win::set_timer(self.hwnd, TIMER_LOADING, LOADING_DELAY_MS + 10);
     }
 
+    /// Request a repaint.
     pub(crate) fn invalidate(&self) {
         win::invalidate(self.hwnd);
     }
 
+    /// Show a notice card for a few seconds.
     pub(crate) fn notify(&mut self, text: String, tone: Tone) {
         self.notice = Some(Notice { text, tone });
         win::set_timer(self.hwnd, TIMER_NOTICE, if tone == Tone::Error { 8000 } else { 4000 });
         self.invalidate();
     }
 
+    /// `WM_APP_LOADED`: take over finished directory loads.
     pub fn on_loaded(&mut self) {
         while let Ok(l) = self.loaded_rx.try_recv() {
             let info = match &l.result {
@@ -202,6 +225,7 @@ impl App {
         self.invalidate();
     }
 
+    /// `WM_APP_DIRCHANGED`: schedule a throttled reload of the panel.
     pub fn on_dir_changed(&mut self, panel: usize) {
         if panel < 2 && !self.refresh_armed[panel] {
             self.refresh_armed[panel] = true;
@@ -209,6 +233,7 @@ impl App {
         }
     }
 
+    /// `WM_TIMER`: all one-shot timers end up here.
     pub fn on_timer(&mut self, id: usize) {
         win::kill_timer(self.hwnd, id);
         match id {
@@ -229,6 +254,7 @@ impl App {
         self.invalidate();
     }
 
+    /// Enter: open the directory under the cursor, or the file with its default program.
     pub(crate) fn open_current(&mut self) {
         let a = self.active;
         let p = &self.panels[a];
@@ -248,6 +274,7 @@ impl App {
         self.arm_loading_indicator();
     }
 
+    /// If a panel is loading, repaint shortly after `LOADING_DELAY_MS` to show "loading".
     pub(crate) fn arm_loading_indicator(&self) {
         if self.panels.iter().any(|p| p.pending.is_some()) {
             win::set_timer(self.hwnd, TIMER_LOADING, LOADING_DELAY_MS + 10);

@@ -1,5 +1,5 @@
 //! Safe wrappers around the Win32 calls the app logic needs.
-//! Goal: `app.rs` and `panel.rs` contain no `unsafe`.
+//! Goal: `app/`, `ui/` and `panel.rs` contain no `unsafe`.
 
 use std::path::{Path, PathBuf};
 

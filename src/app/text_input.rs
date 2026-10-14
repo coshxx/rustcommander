@@ -14,11 +14,13 @@ pub(crate) struct TextInput {
 }
 
 impl TextInput {
+    /// Caret at the end, nothing selected.
     pub(crate) fn new(text: Vec<u16>) -> TextInput {
         let caret = text.len();
         TextInput { text, caret, all: false }
     }
 
+    /// Whole text selected (typing replaces it).
     pub(crate) fn selected(text: Vec<u16>) -> TextInput {
         TextInput { all: !text.is_empty(), ..TextInput::new(text) }
     }
@@ -69,6 +71,7 @@ impl TextInput {
         true
     }
 
+    /// Typed character (replaces the selection).
     pub(crate) fn insert(&mut self, c: u16) {
         if std::mem::take(&mut self.all) {
             self.text.clear();
