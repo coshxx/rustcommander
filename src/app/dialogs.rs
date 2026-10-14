@@ -1,6 +1,7 @@
 //! Modal interactions: drive popup, path editing and the small dialogs
 //! (copy, move, delete, rename, new directory, mark by mask).
 
+use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
 
 use crate::app::format::{describe, parse_path, utf16, valid_name};
@@ -56,22 +57,11 @@ pub(crate) struct Dialog {
     pub(crate) input: Option<TextInput>,
 }
 
-trait FirstWide {
-    fn encode_wide_first(&self) -> Option<u16>;
-}
-
-impl FirstWide for std::ffi::OsStr {
-    fn encode_wide_first(&self) -> Option<u16> {
-        use std::os::windows::ffi::OsStrExt;
-        self.encode_wide().next()
-    }
-}
-
 impl App {
     pub(crate) fn open_drives(&mut self, panel: usize) {
         self.active = panel;
         let drives = win::drives();
-        let cur = self.panels[panel].dir.as_os_str().encode_wide_first();
+        let cur = self.panels[panel].dir.as_os_str().encode_wide().next();
         let sel = drives.iter().position(|d| Some(fold_case(d.root[0])) == cur.map(fold_case)).unwrap_or(0);
         self.mode = Mode::Drives(DrivePopup { panel, drives, sel });
     }

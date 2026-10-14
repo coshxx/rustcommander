@@ -123,22 +123,51 @@ fn kind_from_extension(name: &[u16]) -> Kind {
     }
 }
 
-/// If `path` is a file, its directory is loaded instead and the file gets selected.
-pub fn load(path: &Path, cancel: &AtomicBool) -> Result<Listing, String> {
-    let start = Instant::now();
+/// The directory to list, and the name of the entry to select in it.
+type Target = (PathBuf, Option<Box<[u16]>>);
+
+/// A directory is listed as is; for a file, its directory is listed and the file selected.
+fn directory_of(path: &Path) -> Result<Target, String> {
     let wpath = to_utf16_nul(path.as_os_str());
     let attrs = unsafe { GetFileAttributesW(PCWSTR(wpath.as_ptr())) };
     if attrs == INVALID_FILE_ATTRIBUTES {
         return Err(windows::core::Error::from_thread().message());
     }
-    let (dir, select) = if attrs & FILE_ATTRIBUTE_DIRECTORY.0 == 0 {
+    Ok(if attrs & FILE_ATTRIBUTE_DIRECTORY.0 == 0 {
         match (path.parent(), path.file_name()) {
             (Some(p), Some(f)) => (p.to_path_buf(), Some(f.encode_wide().collect())),
             _ => (path.to_path_buf(), None),
         }
     } else {
         (path.to_path_buf(), None)
-    };
+    })
+}
+
+/// One search result as an `Entry`; `None` for `.` and `..`.
+fn entry_from(data: &WIN32_FIND_DATAW) -> Option<Entry> {
+    let len = data.cFileName.iter().position(|&c| c == 0).unwrap_or(data.cFileName.len());
+    let name = &data.cFileName[..len];
+    if name == [b'.' as u16] || name == [b'.' as u16, b'.' as u16] {
+        return None;
+    }
+    let a = data.dwFileAttributes;
+    let is_dir = a & FILE_ATTRIBUTE_DIRECTORY.0 != 0;
+    let size = ((data.nFileSizeHigh as u64) << 32) | data.nFileSizeLow as u64;
+    Some(Entry {
+        name: name.into(),
+        kind: if is_dir { Kind::Dir } else { kind_from_extension(name) },
+        hidden: a & (FILE_ATTRIBUTE_HIDDEN.0 | FILE_ATTRIBUTE_SYSTEM.0) != 0,
+        size: if is_dir { 0 } else { size },
+        mtime: ((data.ftLastWriteTime.dwHighDateTime as u64) << 32) | data.ftLastWriteTime.dwLowDateTime as u64,
+        marked: false,
+    })
+}
+
+/// List and sort a directory. If `path` is a file, its directory is loaded instead and the
+/// file gets selected. Runs on a loader thread; `cancel` aborts it.
+pub fn load(path: &Path, cancel: &AtomicBool) -> Result<Listing, String> {
+    let start = Instant::now();
+    let (dir, select) = directory_of(path)?;
 
     let mut pattern = long_path(&dir);
     if pattern.last() != Some(&(b'\\' as u16)) {
@@ -168,27 +197,14 @@ pub fn load(path: &Path, cancel: &AtomicBool) -> Result<Listing, String> {
             }
             return Err("cancelled".into());
         }
-        let len = data.cFileName.iter().position(|&c| c == 0).unwrap_or(data.cFileName.len());
-        let name = &data.cFileName[..len];
-        let dot = name == [b'.' as u16] || name == [b'.' as u16, b'.' as u16];
-        if !dot {
-            let a = data.dwFileAttributes;
-            let is_dir = a & FILE_ATTRIBUTE_DIRECTORY.0 != 0;
-            let size = ((data.nFileSizeHigh as u64) << 32) | data.nFileSizeLow as u64;
-            if is_dir {
+        if let Some(e) = entry_from(&data) {
+            if e.is_dir() {
                 dirs += 1;
             } else {
                 files += 1;
-                bytes += size;
+                bytes += e.size;
             }
-            entries.push(Entry {
-                name: name.into(),
-                kind: if is_dir { Kind::Dir } else { kind_from_extension(name) },
-                hidden: a & (FILE_ATTRIBUTE_HIDDEN.0 | FILE_ATTRIBUTE_SYSTEM.0) != 0,
-                size: if is_dir { 0 } else { size },
-                mtime: ((data.ftLastWriteTime.dwHighDateTime as u64) << 32) | data.ftLastWriteTime.dwLowDateTime as u64,
-                marked: false,
-            });
+            entries.push(e);
         }
         if unsafe { FindNextFileW(handle, &mut data) }.is_err() {
             break;

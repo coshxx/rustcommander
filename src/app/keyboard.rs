@@ -70,65 +70,64 @@ impl App {
         handled
     }
 
+    /// Keys in the file lists (no dialog or popup open).
     fn on_key_normal(&mut self, vk: VIRTUAL_KEY, ctrl: bool, shift: bool) -> bool {
-        let a = self.active;
-        let p = &mut self.panels[a];
-        // Scrolled away with the mouse? Any key brings the cursor back into view.
         if !matches!(vk, VK_SHIFT | VK_CONTROL | VK_MENU | VK_LWIN | VK_RWIN) {
-            let top = p.top;
-            p.ensure_visible();
-            if p.top != top {
-                win::invalidate(self.hwnd);
-            }
+            self.bring_cursor_into_view();
         }
+        let handled = self.cursor_key(vk, ctrl, shift) || self.mark_key(vk, ctrl) || self.command_key(vk, ctrl, shift);
+        if handled {
+            self.arm_loading_indicator();
+        }
+        handled
+    }
+
+    /// Scrolled away with the mouse? Any key brings the cursor back into view.
+    fn bring_cursor_into_view(&mut self) {
+        let p = &mut self.panels[self.active];
+        let top = p.top;
+        p.ensure_visible();
+        if p.top != top {
+            win::invalidate(self.hwnd);
+        }
+    }
+
+    /// Moving the cursor (Shift+↑/↓ and Insert also toggle the mark); ends the quick search.
+    fn cursor_key(&mut self, vk: VIRTUAL_KEY, ctrl: bool, shift: bool) -> bool {
+        let p = &mut self.panels[self.active];
         match vk {
-            VK_TAB => {
-                p.search.clear();
-                self.active ^= 1;
-            }
             VK_UP | VK_DOWN if shift => {
-                p.search.clear();
                 p.toggle_mark();
                 p.move_cursor(if vk == VK_UP { -1 } else { 1 });
             }
-            VK_UP => {
-                p.search.clear();
-                p.move_cursor(-1);
-            }
-            VK_DOWN => {
-                p.search.clear();
-                p.move_cursor(1);
-            }
-            VK_PRIOR if ctrl => p.go_up(a, &self.sink),
-            VK_PRIOR => {
-                p.search.clear();
+            VK_UP => p.move_cursor(-1),
+            VK_DOWN => p.move_cursor(1),
+            VK_PRIOR if !ctrl => {
                 let d = -p.page();
                 p.move_cursor(d);
             }
             VK_NEXT => {
-                p.search.clear();
                 let d = p.page();
                 p.move_cursor(d);
             }
-            VK_HOME => {
-                p.search.clear();
-                p.set_cursor(0);
-            }
-            VK_END => {
-                p.search.clear();
-                p.set_cursor(usize::MAX);
-            }
-            VK_RETURN => {
-                p.search.clear();
-                self.open_current();
-            }
+            VK_HOME => p.set_cursor(0),
+            VK_END => p.set_cursor(usize::MAX),
             VK_INSERT => {
-                p.search.clear();
                 p.toggle_mark();
                 p.move_cursor(1);
             }
+            _ => return false,
+        }
+        p.search.clear();
+        true
+    }
+
+    /// Marking by key. Numpad keys like Total Commander; the main row's + and - stay quick
+    /// search characters.
+    fn mark_key(&mut self, vk: VIRTUAL_KEY, ctrl: bool) -> bool {
+        let p = &mut self.panels[self.active];
+        match vk {
             VK_A if ctrl => p.mark_all(),
-            // Numpad, like Total Commander. The main row's + and - stay quick search characters.
             VK_ADD if ctrl => {
                 p.mark_where(true, |_| true);
             }
@@ -140,6 +139,25 @@ impl App {
             VK_MULTIPLY => {
                 self.swallow_next_char = true;
                 p.invert_file_marks();
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    /// Switching panels, navigation, quick search editing and the file operation keys.
+    fn command_key(&mut self, vk: VIRTUAL_KEY, ctrl: bool, shift: bool) -> bool {
+        let a = self.active;
+        let p = &mut self.panels[a];
+        match vk {
+            VK_TAB => {
+                p.search.clear();
+                self.active ^= 1;
+            }
+            VK_PRIOR if ctrl => p.go_up(a, &self.sink),
+            VK_RETURN => {
+                p.search.clear();
+                self.open_current();
             }
             VK_BACK if !p.search.is_empty() => p.search_pop(),
             VK_BACK => p.go_up(a, &self.sink),
@@ -160,7 +178,6 @@ impl App {
             VK_F8 | VK_DELETE => self.open_dialog(DialogKind::Delete { recycle: !shift }),
             _ => return false,
         }
-        self.arm_loading_indicator();
         true
     }
 

@@ -140,6 +140,7 @@ pub(crate) fn mouse_dips(app: &App, lp: LPARAM) -> (f32, f32) {
     (x * k, y * k)
 }
 
+/// Message dispatch: forwards each message to the matching `App` handler.
 extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *const AppCell;
     if ptr.is_null() {
@@ -147,6 +148,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
     }
     // SAFETY: see `main` – the pointer lives as long as the window exists.
     let cell = unsafe { &*ptr };
+    if let Some(result) = mouse_message(cell, hwnd, msg, wp, lp) {
+        return result;
+    }
     let default = || unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
     let done = |handled: Option<bool>| if handled == Some(true) { LRESULT(0) } else { default() };
 
@@ -169,21 +173,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
             LRESULT(0)
         }
         WM_DPICHANGED => {
-            cell.with(|app| app.gfx.set_dpi((wp.0 & 0xffff) as f32));
-            // SAFETY: for WM_DPICHANGED, lParam points to the suggested RECT per the API.
-            let r = unsafe { *(lp.0 as *const RECT) };
-            // Sends WM_SIZE synchronously – hence outside of `with`.
-            let _ = unsafe {
-                SetWindowPos(
-                    hwnd,
-                    None,
-                    r.left,
-                    r.top,
-                    r.right - r.left,
-                    r.bottom - r.top,
-                    SWP_NOZORDER | SWP_NOACTIVATE,
-                )
-            };
+            dpi_changed(cell, hwnd, wp, lp);
             LRESULT(0)
         }
         WM_KEYDOWN => done(cell.with(|app| app.on_key(VIRTUAL_KEY(wp.0 as u16)))),
@@ -194,61 +184,6 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
             app.on_char(wp.0 as u16);
             true
         })),
-        WM_LBUTTONDOWN | WM_LBUTTONDBLCLK | WM_RBUTTONDOWN | WM_RBUTTONDBLCLK => {
-            let _ = unsafe { SetFocus(Some(hwnd)) };
-            let right = matches!(msg, WM_RBUTTONDOWN | WM_RBUTTONDBLCLK);
-            let capture = cell.with(|app| {
-                let (x, y) = mouse_dips(app, lp);
-                app.on_button_down(x, y, right, msg == WM_LBUTTONDBLCLK)
-            });
-            // Capture changes send messages synchronously – hence outside of `with`.
-            if capture == Some(true) {
-                unsafe { SetCapture(hwnd) };
-            }
-            LRESULT(0)
-        }
-        // Handled (no DefWindowProc) so a right click doesn't produce WM_CONTEXTMENU.
-        WM_LBUTTONUP | WM_RBUTTONUP => {
-            let ended = cell.with(|app| {
-                let (x, y) = mouse_dips(app, lp);
-                app.on_button_up(x, y, msg == WM_RBUTTONUP)
-            });
-            if ended == Some(true) {
-                let _ = unsafe { ReleaseCapture() };
-            }
-            LRESULT(0)
-        }
-        WM_MOUSEMOVE => {
-            // Ask for WM_MOUSELEAVE so the scrollbar hover ends when the mouse leaves the window.
-            let mut tme = TRACKMOUSEEVENT {
-                cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
-                dwFlags: TME_LEAVE,
-                hwndTrack: hwnd,
-                dwHoverTime: 0,
-            };
-            let _ = unsafe { TrackMouseEvent(&mut tme) };
-            cell.with(|app| {
-                let (x, y) = mouse_dips(app, lp);
-                app.on_mouse_move(x, y);
-            });
-            LRESULT(0)
-        }
-        WM_MOUSELEAVE => {
-            cell.with(|app| app.on_mouse_leave());
-            LRESULT(0)
-        }
-        WM_CAPTURECHANGED => {
-            cell.with(|app| app.cancel_drag());
-            LRESULT(0)
-        }
-        WM_MOUSEWHEEL => {
-            let mut pt = POINT { x: (lp.0 & 0xffff) as i16 as i32, y: ((lp.0 >> 16) & 0xffff) as i16 as i32 };
-            let _ = unsafe { ScreenToClient(hwnd, &mut pt) };
-            done(cell.with(|app| {
-                app.on_wheel(pt.x as f32 * 96.0 / app.gfx.dpi, ((wp.0 >> 16) & 0xffff) as i16);
-                true
-            }))
-        }
         panel::WM_APP_LOADED => {
             cell.with(|app| app.on_loaded());
             LRESULT(0)
@@ -281,4 +216,76 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
         }
         _ => default(),
     }
+}
+
+/// Moving to a monitor with another DPI: new fonts/scale, then the size Windows suggests.
+fn dpi_changed(cell: &AppCell, hwnd: HWND, wp: WPARAM, lp: LPARAM) {
+    cell.with(|app| app.gfx.set_dpi((wp.0 & 0xffff) as f32));
+    // SAFETY: for WM_DPICHANGED, lParam points to the suggested RECT per the API.
+    let r = unsafe { *(lp.0 as *const RECT) };
+    // Sends WM_SIZE synchronously – hence outside of `with`.
+    let _ = unsafe {
+        SetWindowPos(hwnd, None, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE)
+    };
+}
+
+/// Mouse messages; `None` if `msg` is not one.
+fn mouse_message(cell: &AppCell, hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> Option<LRESULT> {
+    match msg {
+        WM_LBUTTONDOWN | WM_LBUTTONDBLCLK | WM_RBUTTONDOWN | WM_RBUTTONDBLCLK => {
+            let _ = unsafe { SetFocus(Some(hwnd)) };
+            let right = matches!(msg, WM_RBUTTONDOWN | WM_RBUTTONDBLCLK);
+            let capture = cell.with(|app| {
+                let (x, y) = mouse_dips(app, lp);
+                app.on_button_down(x, y, right, msg == WM_LBUTTONDBLCLK)
+            });
+            // Capture changes send messages synchronously – hence outside of `with`.
+            if capture == Some(true) {
+                unsafe { SetCapture(hwnd) };
+            }
+        }
+        // Handled (no DefWindowProc) so a right click doesn't produce WM_CONTEXTMENU.
+        WM_LBUTTONUP | WM_RBUTTONUP => {
+            let ended = cell.with(|app| {
+                let (x, y) = mouse_dips(app, lp);
+                app.on_button_up(x, y, msg == WM_RBUTTONUP)
+            });
+            if ended == Some(true) {
+                let _ = unsafe { ReleaseCapture() };
+            }
+        }
+        WM_MOUSEMOVE => {
+            // Ask for WM_MOUSELEAVE so the scrollbar hover ends when the mouse leaves the window.
+            let mut tme = TRACKMOUSEEVENT {
+                cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
+                dwFlags: TME_LEAVE,
+                hwndTrack: hwnd,
+                dwHoverTime: 0,
+            };
+            let _ = unsafe { TrackMouseEvent(&mut tme) };
+            cell.with(|app| {
+                let (x, y) = mouse_dips(app, lp);
+                app.on_mouse_move(x, y);
+            });
+        }
+        WM_MOUSELEAVE => {
+            cell.with(|app| app.on_mouse_leave());
+        }
+        WM_CAPTURECHANGED => {
+            cell.with(|app| app.cancel_drag());
+        }
+        WM_MOUSEWHEEL => {
+            // Wheel positions are in screen coordinates.
+            let mut pt = POINT { x: (lp.0 & 0xffff) as i16 as i32, y: ((lp.0 >> 16) & 0xffff) as i16 as i32 };
+            let _ = unsafe { ScreenToClient(hwnd, &mut pt) };
+            let handled = cell.with(|app| {
+                app.on_wheel(pt.x as f32 * 96.0 / app.gfx.dpi, ((wp.0 >> 16) & 0xffff) as i16);
+            });
+            if handled.is_none() {
+                return Some(unsafe { DefWindowProcW(hwnd, msg, wp, lp) });
+            }
+        }
+        _ => return None,
+    }
+    Some(LRESULT(0))
 }
