@@ -7,7 +7,7 @@
 //! - A mask without wildcards means "contains": `foto` = `*foto*`.
 //! - `*.*` also matches names without a dot.
 
-use crate::fsx::fold;
+use crate::files::names::fold;
 
 struct Pattern {
     chars: Vec<u32>,

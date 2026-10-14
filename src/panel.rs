@@ -7,9 +7,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::time::Instant;
 
-use crate::fsx::{self, Entry, Kind, Listing, Loaded, Pending};
-use crate::watch::Watcher;
-use crate::win::SendHwnd;
+use crate::files::listing::{self, Entry, Kind, Listing, Loaded, Pending};
+use crate::files::names::{starts_with_ci, to_wide_z};
+use crate::files::watch::Watcher;
+use crate::sys::win::SendHwnd;
 
 pub const WM_APP_LOADED: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 1;
 
@@ -70,7 +71,7 @@ impl Panel {
         self.search.clear();
         let sink = sink.clone();
         std::thread::spawn(move || {
-            let result = fsx::load(&path, &cancel);
+            let result = listing::load(&path, &cancel);
             if cancel.load(Ordering::Relaxed) {
                 return;
             }
@@ -92,7 +93,7 @@ impl Panel {
 
     pub fn go_up(&mut self, index: usize, sink: &LoadSink) {
         if let (Some(parent), Some(name)) = (self.dir.parent(), self.dir.file_name()) {
-            let sel = fsx::to_wide_z(name);
+            let sel = to_wide_z(name);
             let sel = sel[..sel.len() - 1].into();
             self.navigate(index, parent.to_path_buf(), Some(sel), sink);
         }
@@ -297,7 +298,7 @@ impl Panel {
         let hit = self
             .entries
             .iter()
-            .position(|e| e.kind != fsx::Kind::Parent && fsx::starts_with_ci(&e.name, &self.search));
+            .position(|e| e.kind != Kind::Parent && starts_with_ci(&e.name, &self.search));
         if let Some(i) = hit {
             self.set_cursor(i);
         }

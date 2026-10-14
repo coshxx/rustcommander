@@ -13,8 +13,8 @@ use windows::Win32::Storage::FileSystem::{
 use windows::Win32::System::Threading::{CreateEventW, INFINITE, SetEvent, WaitForMultipleObjects};
 use windows::core::PCWSTR;
 
-use crate::fsx::to_wide_z;
-use crate::win::SendHwnd;
+use crate::files::names::to_wide_z;
+use crate::sys::win::SendHwnd;
 
 /// Event handle shared between the UI and the watcher thread; closed when both are done.
 struct Event(HANDLE);
