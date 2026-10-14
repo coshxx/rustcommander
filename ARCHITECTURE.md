@@ -36,7 +36,8 @@ thread touches.
 | `panel.rs` | One file list: directory, entries, cursor, scroll position, marks, quick search. |
 | `files/` | Files, but not operations on them: listing directories (`listing`), archives as read-only directories (`archive`), UTF-16 names and natural sort (`names`), marking masks (`mask`), change notifications (`watch`), temp files for opening entries of archives (`temp`). |
 | `ops/` | File operations on a worker thread: `copy`, `moving`, `delete`, `extract` (from archives); `mod.rs` holds the public API (`Job`, `Handle`, `Event`) and the shared worker logic. |
-| `sys/` | Thin safe wrappers around Win32 (`win`), Direct2D/DirectWrite (`gfx`) and libarchive from Windows' `archiveint.dll` (`libarchive`). |
+| `lister/` | The F3 viewer: its own windows (`window`), state and commands (`mod.rs`), input, drawing, the byte → screen line logic (`text`, pure and tested) and the search (`search`). |
+| `sys/` | Thin safe wrappers around Win32 (`win`), Direct2D/DirectWrite (`gfx`), libarchive from Windows' `archiveint.dll` (`libarchive`) and memory-mapped files (`mapped`). |
 | `config.rs`, `theme.rs`, `timing.rs` | Settings file, colors, `--timing` measurements. |
 
 `App` is one struct, but its methods are spread over the files in `app/` and `ui/` (one
@@ -51,6 +52,7 @@ thread touches.
 | Directory watcher (one per panel) | `App::on_loaded` | `WM_APP_DIRCHANGED` (wParam = panel) | `App::on_dir_changed` → throttled reload |
 | Shell open | `win::shell_open` | – | – |
 | Temp cleanup (once) | `main` (`files::temp::sweep_old`) | – | – |
+| Lister search (one per search) | `Lister::search` → `search::start` | `WM_APP_SEARCH` (to the lister window) + channel | `Lister::on_search_event` |
 
 Data always travels through an `mpsc` channel; the posted message only wakes the UI thread.
 A loader result that arrives after a newer load was started is dropped (`Applied::Stale`).
@@ -70,6 +72,15 @@ into `Job::Extract` and refuses everything that would write. Extraction is one s
 over the archive (`ops/extract.rs`); entry paths go through `archive::clean_path`, which rejects
 anything that could leave the destination.
 
+## Lister windows
+
+F3 doesn't create the window right away: `App::request_view` posts `WM_APP_VIEW` to the main
+window, and `window.rs` opens the lister outside of `AppCell::with` (creating a window sends
+messages to the main window synchronously). Each lister window owns a `Lister` in its own
+`AppCell<Lister>`, freed on `WM_NCDESTROY`; all of them run on the UI thread. The file is
+memory-mapped; the view is a byte offset (`top`), and `lister/text.rs` turns offsets into screen
+lines on demand (`line`, `back`, `align`), so nothing ever walks the whole file except a search.
+
 ## Life of a key press
 
 `WM_KEYDOWN` → `wndproc` → `App::on_key` → depends on `App::mode`: a dialog, the path editor, the
@@ -80,7 +91,7 @@ rows are drawn, which keeps a frame at a few milliseconds.
 ## Rules
 
 - **`unsafe`** only in the OS boundary: `main.rs`, `window.rs`, `sys/`, `files/listing.rs`,
-  `files/watch.rs`, `ops/`, `timing.rs`. `app/`, `ui/` and `panel.rs` call safe wrappers.
+  `files/watch.rs`, `ops/`, `timing.rs`, `lister/window.rs`. `app/`, `ui/` and `panel.rs` call safe wrappers.
 - **Reentrancy:** Win32 sometimes calls `wndproc` again while a handler is still running.
   `AppCell` detects that instead of creating a second `&mut App`. Calls that send messages
   synchronously (`SetWindowPos`, `DestroyWindow`, `SetCapture`, …) are made outside of

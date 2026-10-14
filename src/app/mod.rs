@@ -17,7 +17,7 @@ use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::WM_APP;
 
 use crate::app::dialogs::{Dialog, DrivePopup};
-use crate::app::jobs::RunningJob;
+use crate::app::jobs::{AfterJob, RunningJob};
 use crate::app::mouse::Drag;
 use crate::app::text_input::TextInput;
 use crate::config::Config;
@@ -36,6 +36,8 @@ pub const LOADING_DELAY_MS: u32 = 150;
 pub const WM_APP_JOB: u32 = WM_APP + 2;
 /// Posted by a directory watcher; `wParam` = panel index.
 pub const WM_APP_DIRCHANGED: u32 = WM_APP + 3;
+/// Posted to itself: open the files in `App::view_requests` in lister windows.
+pub const WM_APP_VIEW: u32 = WM_APP + 4;
 
 // Timer IDs (`WM_TIMER`).
 const TIMER_LOADING: usize = 1;
@@ -108,6 +110,8 @@ pub struct App {
     pub(crate) mask: String,
     /// The key that just opened a dialog also produces a WM_CHAR (e.g. Num+ → '+'): drop it.
     pub(crate) swallow_next_char: bool,
+    /// Files to open in a lister (F3); opened by `window.rs` on `WM_APP_VIEW`.
+    pub(crate) view_requests: Vec<PathBuf>,
     /// For `--timing`: the first frame / the first frame with both panels loaded was drawn.
     pub(crate) painted: bool,
     pub(crate) painted_content: bool,
@@ -148,6 +152,7 @@ impl App {
             hover_bar: None,
             mask: cfg.mask.clone().unwrap_or_else(|| "*.*".into()),
             swallow_next_char: false,
+            view_requests: Vec::new(),
             painted: false,
             painted_content: false,
         };
@@ -157,7 +162,12 @@ impl App {
 
     /// Current state to save on exit.
     pub fn config(&self, hwnd: HWND) -> Config {
-        let mut cfg = Config { active: self.active, mask: Some(self.mask.clone()), ..Default::default() };
+        let mut cfg = Config {
+            active: self.active,
+            mask: Some(self.mask.clone()),
+            lister: crate::lister::settings(),
+            ..Default::default()
+        };
         for i in 0..2 {
             if !self.panels[i].dir.as_os_str().is_empty() {
                 cfg.paths[i] = Some(self.panels[i].dir.clone());
@@ -270,11 +280,31 @@ impl App {
         match kind {
             Kind::Parent => self.panels[a].go_up(a, &self.sink),
             Kind::Dir => self.navigate(a, path, None),
-            _ if in_archive => self.open_from_archive(a, path),
+            _ if in_archive => self.extract_then(a, path, AfterJob::Open),
             _ if is_archive && !shell => self.navigate(a, path, None),
             _ => win::shell_open(path),
         }
         self.arm_loading_indicator();
+    }
+
+    /// F3: show the file under the cursor in a lister window (from an archive: extract first).
+    pub(crate) fn view_current(&mut self) {
+        let a = self.active;
+        let p = &self.panels[a];
+        let Some(e) = p.current().filter(|e| e.kind != Kind::Parent && !e.is_dir()) else { return };
+        let path = p.dir.join(e.os_name());
+        if p.archive.is_some() {
+            self.extract_then(a, path, AfterJob::View);
+        } else {
+            self.request_view(path);
+        }
+    }
+
+    /// Open `path` in a lister. The window is created on `WM_APP_VIEW`, outside of this
+    /// handler: creating a window sends messages to the main window synchronously.
+    pub(crate) fn request_view(&mut self, path: PathBuf) {
+        self.view_requests.push(path);
+        SendHwnd::new(self.hwnd).post(WM_APP_VIEW);
     }
 
     /// Ctrl+PgDn: like Enter, but only for directories and archives.

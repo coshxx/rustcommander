@@ -19,8 +19,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::w;
 
 use crate::app::App;
-use crate::config::Config;
-use crate::{app, panel, theme};
+use crate::{app, lister, panel, theme};
 
 const TITLE: windows::core::PCWSTR = w!("RustCommander");
 
@@ -29,18 +28,19 @@ const TITLE: windows::core::PCWSTR = w!("RustCommander");
 /// lock that would create two `&mut App` at once – undefined behavior. Instead, nested
 /// access is detected: debug builds panic (to find the bug), release builds pass the
 /// message on to `DefWindowProcW`.
-pub(crate) struct AppCell {
+/// Lister windows use the same cell for their state (`AppCell<Lister>`).
+pub(crate) struct AppCell<T = App> {
     busy: Cell<bool>,
-    app: UnsafeCell<App>,
+    app: UnsafeCell<T>,
 }
 
-impl AppCell {
-    pub(crate) fn new(app: App) -> AppCell {
+impl<T> AppCell<T> {
+    pub(crate) fn new(app: T) -> AppCell<T> {
         AppCell { busy: Cell::new(false), app: UnsafeCell::new(app) }
     }
 
     /// `None` if the app is already in use.
-    pub(crate) fn with<R>(&self, f: impl FnOnce(&mut App) -> R) -> Option<R> {
+    pub(crate) fn with<R>(&self, f: impl FnOnce(&mut T) -> R) -> Option<R> {
         if self.busy.replace(true) {
             debug_assert!(false, "nested access to App (reentrancy in wndproc)");
             return None;
@@ -93,21 +93,27 @@ pub(crate) fn create_window() -> HWND {
         )
         .expect("CreateWindowExW");
 
-        let set = |attr, v: u32| {
-            let _ = DwmSetWindowAttribute(hwnd, attr, &v as *const u32 as *const _, 4);
-        };
-        set(DWMWA_USE_IMMERSIVE_DARK_MODE, 1);
-        set(DWMWA_CAPTION_COLOR, theme::colorref(0x16181d));
-        set(DWMWA_BORDER_COLOR, theme::colorref(0x2b2e36));
-        set(DWMWA_TEXT_COLOR, theme::colorref(0xd8dbe2));
+        dark_title_bar(hwnd);
         hwnd
     }
 }
 
-/// Show the window at the saved position, or centered on first start.
-pub(crate) fn show_window(hwnd: HWND, cfg: &Config) {
+/// Dark title bar and border, matching the theme.
+pub(crate) fn dark_title_bar(hwnd: HWND) {
+    let set = |attr, v: u32| {
+        let _ = unsafe { DwmSetWindowAttribute(hwnd, attr, &v as *const u32 as *const _, 4) };
+    };
+    set(DWMWA_USE_IMMERSIVE_DARK_MODE, 1);
+    set(DWMWA_CAPTION_COLOR, theme::colorref(0x16181d));
+    set(DWMWA_BORDER_COLOR, theme::colorref(0x2b2e36));
+    set(DWMWA_TEXT_COLOR, theme::colorref(0xd8dbe2));
+}
+
+/// Show the window at a saved position (normal rectangle + maximized), or where Windows puts
+/// it if there is none or it is off-screen.
+pub(crate) fn show_window(hwnd: HWND, placement: Option<([i32; 4], bool)>) {
     unsafe {
-        if let Some((r, max)) = cfg.window {
+        if let Some((r, max)) = placement {
             let rc = RECT { left: r[0], top: r[1], right: r[2], bottom: r[3] };
             if !MonitorFromRect(&rc, MONITOR_DEFAULTTONULL).is_invalid() {
                 let wp = WINDOWPLACEMENT {
@@ -204,7 +210,13 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
             cell.with(|app| app.on_dir_changed(wp.0));
             LRESULT(0)
         }
+        app::WM_APP_VIEW => {
+            open_listers(cell);
+            LRESULT(0)
+        }
         WM_CLOSE => {
+            // Listers first: they save their settings, which go into the config below.
+            lister::close_all();
             cell.with(|app| {
                 if !app.timing.bench {
                     app.config(hwnd).save();
@@ -219,6 +231,17 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
             LRESULT(0)
         }
         _ => default(),
+    }
+}
+
+/// `WM_APP_VIEW`: open the files the app asked to view. Creating a window sends messages
+/// synchronously (activation, focus), hence outside of `with`.
+fn open_listers(cell: &AppCell) {
+    let paths = cell.with(|app| std::mem::take(&mut app.view_requests)).unwrap_or_default();
+    for path in paths {
+        if let Err(e) = lister::open(&path) {
+            cell.with(|app| app.notify(e, app::Tone::Error));
+        }
     }
 }
 

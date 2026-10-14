@@ -24,7 +24,7 @@ the steady-state frame time).
 - **Direct2D in software mode** (default). Measured: the hardware render target costs ~150 ms at
   startup (loading D3D + GPU driver) and doesn't draw faster. `RC_HARDWARE=1` switches for comparison.
 - `unsafe` lives only in the OS boundary modules (`main.rs`, `window.rs`, `sys/`, `files/listing.rs`,
-  `files/watch.rs`, `ops/`, `timing.rs`). App logic (`app/`, `ui/`, `panel.rs`) is free of `unsafe`.
+  `files/watch.rs`, `ops/`, `timing.rs`, `lister/window.rs`). App logic (`app/`, `ui/`, `panel.rs`) is free of `unsafe`.
   The window procedure guards the app against reentrant access (`AppCell`).
 - Code structure: see [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -55,6 +55,7 @@ the steady-state frame time).
 | ↑ ↓ PgUp PgDn Home End | Move cursor |
 | Enter / double-click | Open directory or archive, or open file via shell (from an archive: extracted to temp first) |
 | Shift+Enter | Open with the default program, also archives |
+| F3 | View the file in a lister window (see below; from an archive: extracted to temp first) |
 | Ctrl+PgDn | Enter directory or archive (nothing else) |
 | Backspace, Ctrl+PgUp | Parent directory |
 | \ | Drive root (also works on German keyboard layouts) |
@@ -137,9 +138,37 @@ without a dot. Num+ adds to the existing marks, Num− only removes matches. The
 - Encrypted archives: the listing is shown if readable; extracting encrypted entries reports
   "Passwörter werden noch nicht unterstützt".
 
+## Lister (F3)
+
+A separate, non-modal window per file, like Total Commander's Lister; any number can be open.
+Closing the main window closes them.
+
+- **Instant for any size:** the file is memory-mapped (shared read/write/delete, so other
+  programs are never blocked) and only the visible lines are decoded. The position is a byte
+  offset, not a line number, so no pass over the whole file is needed; the scrollbar maps to the
+  byte position. Lines longer than 4096 characters are broken even without wrapping; scrolling up
+  into a line longer than 64 KB may start it at an arbitrary point.
+- **Modes:** `1` text (line breaks, wrap at the window edge), `2` binary (80 bytes per line, line
+  breaks ignored), `3` hex (offset, 16 bytes, characters). The start mode is guessed from the
+  first 64 KB: NUL bytes or many control codes → hex, otherwise text.
+- **Encoding (text):** byte order mark → UTF-8 / UTF-16 LE / BE; UTF-16 without BOM is recognized
+  by its zero bytes; otherwise UTF-8 if valid, else ANSI. `A` ANSI, `S` DOS (OEM code page, with
+  the DOS glyphs), `u` UTF-8, `U` (Shift+U) UTF-16. Binary and hex mode show ANSI or DOS.
+- **Keys:** ↑ ↓ PgUp PgDn Home End, ← → (Ctrl: half a page) scroll sideways when lines don't
+  wrap, `W` wrap on/off (saved), wheel, scrollbar (drag the thumb, click the track to page).
+  Esc or `Q` closes; F3 closes as well until a search was made in the window.
+- **Search:** F7 or Ctrl+F opens a small dialog (last term preselected); Alt+G toggles "match
+  case" (default: ignore case, also for umlauts). Searches forward from the match on screen or
+  from the top line; F3 next, Shift+F3 previous. Runs on a background thread over the raw bytes
+  (the term is encoded in the shown encoding; binary/hex search ANSI/DOS text); the status bar
+  shows the progress, Esc cancels. The match is highlighted and scrolled into view.
+- **Status bar:** mode, encoding, wrap, file size, position in %, hex offset; key hints.
+- Window position and wrapping are saved in `config.ini` (`lister_window`, `lister_wrap`).
+
 ## Deliberately later
 
-Archives: packing (Alt+F5) and writing into archives, password dialog, archives inside archives,
+Lister: selecting and copying text, images, following growing files, N/P for the next/previous
+file, line numbers, hex search (`4D 5A`). Archives: packing (Alt+F5) and writing into archives, password dialog, archives inside archives,
 7-Zip's `7z.dll` as a fallback for Windows 10. Parallel copying of many small files, shell context
 menu (long right press / Shift+F10, since a right click marks), system icons (async, cached), live filter, light theme, settings, normalizing path casing
 (typed `c:\windows` → `C:\Windows`), partial redraws (if frame time on large windows becomes an issue).

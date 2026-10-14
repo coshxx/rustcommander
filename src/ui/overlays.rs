@@ -9,6 +9,7 @@ use crate::app::jobs::JOB_CARD_DELAY_MS;
 use crate::app::layout::{CARD_W, ICON_W, KEYBAR_H, ROW_H, STATUS_H};
 use crate::app::{App, Tone};
 use crate::sys::gfx::{Canvas, rect};
+use crate::ui::widgets::{draw_card, draw_chips, draw_input};
 
 /// Icon and label for a drive type (`GetDriveTypeW`).
 fn drive_info(kind: u32) -> (u16, &'static str) {
@@ -29,7 +30,7 @@ impl App {
         let input_h = if d.input.is_some() { 44.0 } else { 0.0 };
         let dh = 20.0 + 28.0 + 26.0 + input_h + 44.0;
         let r = rect(((w - dw) / 2.0).floor(), ((h - dh) / 2.5).floor(), dw, dh);
-        self.draw_card(c, r);
+        draw_card(c, t, r);
         let x = r.left + 20.0;
         let iw = dw - 40.0;
         let mut y = r.top + 16.0;
@@ -39,11 +40,11 @@ impl App {
         c.text_str(&d.message, &c.fonts.name, rect(x, y, iw, 26.0), t.text_dim);
         y += 30.0;
         if let (Some(input), Some(cx)) = (&d.input, caret_x) {
-            self.draw_input(c, rect(x, y, iw, 32.0), input, cx);
+            draw_input(c, &self.gfx, t, rect(x, y, iw, 32.0), input, cx);
             y += input_h;
         }
         let ok = if matches!(d.kind, DialogKind::Delete { .. }) { "Löschen" } else { "OK" };
-        self.draw_chips(c, x, y, 28.0, &[("Enter", ok), ("Esc", "Abbrechen")]);
+        draw_chips(c, &self.gfx, t, x, y, 28.0, &[("Enter", ok), ("Esc", "Abbrechen")]);
     }
 
     pub(crate) fn draw_conflict(&self, c: &Canvas, path: &Path, w: f32, h: f32) {
@@ -52,7 +53,7 @@ impl App {
         let dw = (w - 48.0).clamp(200.0, 720.0);
         let dh = 20.0 + 28.0 + 26.0 + 44.0;
         let r = rect(((w - dw) / 2.0).floor(), ((h - dh) / 2.5).floor(), dw, dh);
-        self.draw_card(c, r);
+        draw_card(c, t, r);
         let x = r.left + 20.0;
         let iw = dw - 40.0;
         c.text_str("Ziel existiert bereits", &c.fonts.path, rect(x, r.top + 16.0, iw, 28.0), t.marked);
@@ -64,7 +65,7 @@ impl App {
             ("K", "Keine überschreiben"),
             ("Esc", "Abbrechen"),
         ];
-        self.draw_chips(c, x, r.top + 74.0, 28.0, &chips);
+        draw_chips(c, &self.gfx, t, x, r.top + 74.0, 28.0, &chips);
     }
 
     pub(crate) fn draw_job_or_notice(&self, c: &Canvas, w: f32, h: f32) {
@@ -78,7 +79,7 @@ impl App {
             }
             let p = &job.progress;
             let r = rect(x, bottom - 92.0, cw, 92.0);
-            self.draw_card(c, r);
+            draw_card(c, t, r);
             let ix = r.left + 16.0;
             let iw = cw - 32.0;
             let frac = if p.bytes_total > 0 {
@@ -111,7 +112,7 @@ impl App {
             c.text_str("Esc bricht ab", &c.fonts.small_right, rect(ix, r.top + 64.0, iw, 22.0), t.text_hidden);
         } else if let Some(n) = &self.notice {
             let r = rect(x, bottom - 40.0, cw, 40.0);
-            self.draw_card(c, r);
+            draw_card(c, t, r);
             let (glyph, col) = match n.tone {
                 Tone::Success => (0xE73E, t.success),
                 Tone::Info => (0xE946, t.text_dim),

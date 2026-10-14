@@ -8,6 +8,7 @@
 mod app;
 mod config;
 mod files;
+mod lister;
 mod ops;
 mod panel;
 mod sys;
@@ -43,6 +44,7 @@ fn main() {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     }
     let cfg = Config::load();
+    lister::set_settings(cfg.lister.clone());
     let hwnd = create_window();
     timing.mark("window created");
 
@@ -55,7 +57,7 @@ fn main() {
     });
     unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, cell as isize) };
     cell_ref.with(|app| app.timing.mark("before ShowWindow"));
-    show_window(hwnd, &cfg);
+    show_window(hwnd, cfg.window);
     // Leftovers from files opened out of archives in earlier sessions.
     std::thread::spawn(files::temp::sweep_old);
     cell_ref.with(|app| app.timing.mark("after ShowWindow"));

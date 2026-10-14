@@ -4,6 +4,9 @@
 use std::path::{Path, PathBuf};
 
 use windows::Win32::Foundation::{FILETIME, HGLOBAL, HWND, LPARAM, SYSTEMTIME, WPARAM};
+use windows::Win32::Globalization::{
+    CP_ACP, CP_OEMCP, MB_USEGLYPHCHARS, MULTI_BYTE_TO_WIDE_CHAR_FLAGS, MultiByteToWideChar,
+};
 use windows::Win32::Graphics::Gdi::InvalidateRect;
 use windows::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives};
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
@@ -164,4 +167,18 @@ pub fn shell_open(path: PathBuf) {
             );
         }
     });
+}
+
+/// The 256 characters of the system's ANSI code page (e.g. Windows-1252) or, with `oem`, of its
+/// DOS code page (e.g. 850; control codes become the DOS glyphs like ☺ and ♥).
+pub fn code_page(oem: bool) -> [u16; 256] {
+    let (cp, flags) = if oem { (CP_OEMCP, MB_USEGLYPHCHARS) } else { (CP_ACP, MULTI_BYTE_TO_WIDE_CHAR_FLAGS(0)) };
+    let mut table = [0xFFFDu16; 256];
+    for (b, slot) in table.iter_mut().enumerate() {
+        let mut out = [0u16; 2];
+        if unsafe { MultiByteToWideChar(cp, flags, &[b as u8], Some(&mut out)) } == 1 {
+            *slot = out[0];
+        }
+    }
+    table
 }

@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 
+use crate::lister;
+
 #[derive(Default)]
 pub struct Config {
     pub paths: [Option<PathBuf>; 2],
@@ -10,6 +12,18 @@ pub struct Config {
     pub window: Option<([i32; 4], bool)>,
     /// Last file mask for marking (Num+ / Num−).
     pub mask: Option<String>,
+    /// Lister window position and wrapping.
+    pub lister: lister::Settings,
+}
+
+/// `left,top,right,bottom,maximized` → window placement.
+fn parse_window(v: &str) -> Option<([i32; 4], bool)> {
+    let n: Vec<i32> = v.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+    (n.len() == 5 && n[2] > n[0] && n[3] > n[1]).then(|| ([n[0], n[1], n[2], n[3]], n[4] != 0))
+}
+
+fn format_window((r, max): ([i32; 4], bool)) -> String {
+    format!("{},{},{},{},{}", r[0], r[1], r[2], r[3], max as i32)
 }
 
 /// `RC_CONFIG_DIR` overrides the location (used for tests, keeps the real config untouched).
@@ -41,12 +55,9 @@ impl Config {
                 "right" => cfg.paths[1] = Some(PathBuf::from(v.trim())),
                 "mask" => cfg.mask = Some(v.trim().to_string()),
                 "active" => cfg.active = (v.trim() == "1") as usize,
-                "window" => {
-                    let n: Vec<i32> = v.split(',').filter_map(|s| s.trim().parse().ok()).collect();
-                    if n.len() == 5 && n[2] > n[0] && n[3] > n[1] {
-                        cfg.window = Some(([n[0], n[1], n[2], n[3]], n[4] != 0));
-                    }
-                }
+                "window" => cfg.window = parse_window(v),
+                "lister_window" => cfg.lister.window = parse_window(v),
+                "lister_wrap" => cfg.lister.wrap = v.trim() != "0",
                 _ => {}
             }
         }
@@ -62,9 +73,13 @@ impl Config {
             }
         }
         out += &format!("active={}\n", self.active);
-        if let Some((r, max)) = self.window {
-            out += &format!("window={},{},{},{},{}\n", r[0], r[1], r[2], r[3], max as i32);
+        if let Some(w) = self.window {
+            out += &format!("window={}\n", format_window(w));
         }
+        if let Some(w) = self.lister.window {
+            out += &format!("lister_window={}\n", format_window(w));
+        }
+        out += &format!("lister_wrap={}\n", self.lister.wrap as i32);
         if let Some(m) = &self.mask {
             out += &format!("mask={m}\n");
         }

@@ -8,6 +8,7 @@ use crate::files::listing::{Entry, Kind};
 use crate::panel::Panel;
 use crate::sys::gfx::{Canvas, rect};
 use crate::theme::{Color, Theme};
+use crate::ui::widgets::draw_input;
 
 pub(crate) fn icon(kind: Kind, t: &Theme) -> (u16, Color) {
     match kind {
@@ -80,7 +81,7 @@ impl App {
         match (&self.mode, caret_x) {
             (Mode::PathEdit { panel, input }, Some(cx)) if *panel == a.index => {
                 let r = rect(path_x - 6.0, 6.0, x + pw - PAD - path_x + 6.0, PATH_H - 14.0);
-                self.draw_input(c, r, input, cx);
+                draw_input(c, &self.gfx, self.theme, r, input, cx);
             }
             _ => {
                 let r = rect(path_x, 0.0, x + pw - PAD - path_x - right_w, PATH_H - 2.0);

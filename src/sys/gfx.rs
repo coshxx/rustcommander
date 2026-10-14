@@ -34,6 +34,8 @@ pub struct Fonts {
     pub small_center: IDWriteTextFormat,
     pub path: IDWriteTextFormat,
     pub icon: IDWriteTextFormat,
+    /// Fixed-width font of the lister.
+    pub mono: IDWriteTextFormat,
 }
 
 pub struct Gfx {
@@ -94,6 +96,7 @@ impl Gfx {
                 if family_exists(&dwrite, "Segoe UI Variable Text") { "Segoe UI Variable Text" } else { "Segoe UI" };
             let icons =
                 if family_exists(&dwrite, "Segoe Fluent Icons") { "Segoe Fluent Icons" } else { "Segoe MDL2 Assets" };
+            let mono = if family_exists(&dwrite, "Consolas") { "Consolas" } else { "Courier New" };
             let n = DWRITE_FONT_WEIGHT_NORMAL;
             let fonts = Fonts {
                 name: format(&dwrite, ui, 13.5, n, DWRITE_TEXT_ALIGNMENT_LEADING)?,
@@ -103,6 +106,7 @@ impl Gfx {
                 small_center: format(&dwrite, ui, 11.5, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER)?,
                 path: format(&dwrite, ui, 13.5, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING)?,
                 icon: format(&dwrite, icons, 15.0, n, DWRITE_TEXT_ALIGNMENT_CENTER)?,
+                mono: format(&dwrite, mono, 14.0, n, DWRITE_TEXT_ALIGNMENT_LEADING)?,
             };
             Ok(Gfx { factory, dwrite, fonts, target: None, dpi: 96.0 })
         }

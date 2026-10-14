@@ -175,6 +175,7 @@ impl App {
             VK_F2 => p.reload(a, &self.sink),
             VK_R if ctrl => p.reload(a, &self.sink),
             VK_L if ctrl => self.start_path_edit(a),
+            VK_F3 => self.view_current(),
             VK_F5 => self.open_dialog(DialogKind::Copy),
             VK_F6 if shift => self.open_dialog(DialogKind::Rename),
             VK_F6 => self.open_dialog(DialogKind::Move),

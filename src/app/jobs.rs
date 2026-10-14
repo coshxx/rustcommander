@@ -13,14 +13,24 @@ use crate::sys::win::{self, SendHwnd};
 /// Short jobs (rename, mkdir) finish before their progress card would appear.
 pub(crate) const JOB_CARD_DELAY_MS: u32 = 200;
 
+/// What happens when a job finished successfully.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AfterJob {
+    /// Show the result as a notice.
+    Report,
+    /// Open the extracted file with its default program (Enter in an archive).
+    Open,
+    /// Show the extracted file in a lister (F3 in an archive).
+    View,
+}
+
 pub(crate) struct RunningJob {
     pub(crate) handle: ops::Handle,
     pub(crate) title: &'static str,
     pub(crate) progress: ops::Progress,
     source_panel: usize,
     pub(crate) started: Instant,
-    /// Extracting a file from an archive to open it: open the result instead of reporting.
-    open_when_done: bool,
+    then: AfterJob,
 }
 
 impl App {
@@ -33,24 +43,25 @@ impl App {
             progress: ops::Progress::default(),
             source_panel,
             started: Instant::now(),
-            open_when_done: false,
+            then: AfterJob::Report,
         });
         self.notice = None;
         win::set_timer(self.hwnd, TIMER_JOB, JOB_CARD_DELAY_MS + 10);
     }
 
-    /// Enter on a file inside an archive: extract it to a temp directory, then open it with its
-    /// default program.
-    pub(crate) fn open_from_archive(&mut self, panel: usize, path: PathBuf) {
+    /// Enter or F3 on a file inside an archive: extract it to a temp directory, then open it with
+    /// its default program or in a lister.
+    pub(crate) fn extract_then(&mut self, panel: usize, path: PathBuf, then: AfterJob) {
         if self.job.is_some() {
             self.notify("Es läuft bereits ein Vorgang".into(), Tone::Error);
             return;
         }
         match temp::new_dir() {
             Ok(dir) => {
-                self.start_job(Job::Extract { sources: vec![path], dest: dir }, "Öffnen", panel);
+                let title = if then == AfterJob::View { "Ansehen" } else { "Öffnen" };
+                self.start_job(Job::Extract { sources: vec![path], dest: dir }, title, panel);
                 if let Some(job) = &mut self.job {
-                    job.open_when_done = true;
+                    job.then = then;
                 }
             }
             Err(e) => self.notify(format!("Temp-Ordner: {e}"), Tone::Error),
@@ -80,12 +91,15 @@ impl App {
         if matches!(self.mode, Mode::Conflict(_)) {
             self.mode = Mode::Normal;
         }
-        if job.open_when_done
+        if job.then != AfterJob::Report
             && s.errors.is_empty()
             && !s.cancelled
             && let Some(file) = s.select
         {
-            win::shell_open(file);
+            match job.then {
+                AfterJob::View => self.request_view(file),
+                _ => win::shell_open(file),
+            }
             return;
         }
         let (text, tone) = if let Some(first) = s.errors.first() {

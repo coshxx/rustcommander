@@ -160,7 +160,7 @@ fn same_volume(a: &Path, b: &Path) -> bool {
 }
 
 /// OS error message without the trailing "(os error N)".
-fn error_text(e: &std::io::Error) -> String {
+pub(crate) fn error_text(e: &std::io::Error) -> String {
     match e.raw_os_error() {
         Some(code) => windows::core::Error::from_hresult(windows::core::HRESULT::from_win32(code as u32))
             .message()

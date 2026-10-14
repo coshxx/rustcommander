@@ -2,7 +2,7 @@
 
 mod overlays;
 mod panel;
-mod widgets;
+pub(crate) mod widgets;
 
 use std::time::Instant;
 

@@ -41,6 +41,8 @@ pub struct Theme {
     pub scroll_thumb_hover: Color,
     pub scroll_thumb_drag: Color,
     pub scroll_track: Color,
+    /// Background of a search match in the lister.
+    pub search_hit: Color,
 
     pub icon_folder: Color,
     pub icon_parent: Color,
@@ -76,6 +78,7 @@ pub const DARK: Theme = Theme {
     scroll_thumb_hover: rgba(0xffffff, 0.32),
     scroll_thumb_drag: rgba(0xffffff, 0.46),
     scroll_track: rgba(0xffffff, 0.04),
+    search_hit: rgba(0xf2c14e, 0.38),
 
     icon_folder: rgb(0xe8b04a),
     icon_parent: rgb(0x80868f),
