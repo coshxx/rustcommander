@@ -1,4 +1,4 @@
-//! Dünne Hülle um Direct2D/DirectWrite: Render-Target, ein Pinsel, Textformate.
+//! Thin wrapper around Direct2D/DirectWrite: render target, one brush, text formats.
 
 use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::Graphics::Direct2D::Common::{D2D_RECT_F, D2D_SIZE_U};
@@ -129,7 +129,7 @@ impl Gfx {
 
     pub fn ensure_target(&mut self, hwnd: HWND) -> Result<()> {
         if let Some((t, _)) = &self.target {
-            // Selbstheilend, falls ein WM_SIZE verloren ging.
+            // Self-healing in case a WM_SIZE got lost.
             let want = Self::client_size(hwnd);
             let have = unsafe { t.GetPixelSize() };
             if have.width != want.width || have.height != want.height {
@@ -141,8 +141,8 @@ impl Gfx {
         }
         unsafe {
             let mut props = D2D1_RENDER_TARGET_PROPERTIES { dpiX: self.dpi, dpiY: self.dpi, ..Default::default() };
-            // Software-Rendering: das Hardware-Target kostet beim Start ~150 ms (D3D/Treiber laden),
-            // zeichnet aber nicht schneller. Gemessen: Start 40 statt 175 ms, Frame 7–12 ms.
+            // Software rendering: the hardware target costs ~150 ms at startup (loading D3D and the
+            // GPU driver) and doesn't draw faster. Measured: startup 40 vs 175 ms, frames 7–12 ms.
             if std::env::var_os("RC_HARDWARE").is_none() {
                 props.r#type = windows::Win32::Graphics::Direct2D::D2D1_RENDER_TARGET_TYPE_SOFTWARE;
             }
@@ -176,14 +176,14 @@ impl Gfx {
         }
     }
 
-    /// Größe des Client-Bereichs in DIPs.
+    /// Client area size in DIPs.
     pub fn size_dips(&self, hwnd: HWND) -> (f32, f32) {
         let s = Self::client_size(hwnd);
         let k = 96.0 / self.dpi;
         (s.width as f32 * k, s.height as f32 * k)
     }
 
-    /// Textbreite in DIPs (inkl. Leerzeichen am Ende).
+    /// Text width in DIPs (including trailing whitespace).
     pub fn measure(&self, s: &[u16], f: &IDWriteTextFormat) -> f32 {
         unsafe {
             let Ok(layout) = self.dwrite.CreateTextLayout(s, f, 10000.0, 100.0) else {
@@ -207,7 +207,7 @@ impl Gfx {
         Some(Canvas { target, brush, fonts: &self.fonts })
     }
 
-    /// Frame abschließen; bei verlorenem Gerät wird das Target neu erzeugt.
+    /// Finish the frame; if the device was lost, the target is recreated next time.
     pub fn end(&mut self) {
         if let Some((t, _)) = &self.target {
             if unsafe { t.EndDraw(None, None) }.is_err() {

@@ -1,4 +1,4 @@
-//! `--timing`: Zeiten ab Prozess-Erzeugung (nicht ab `main`) messen und loggen.
+//! `--timing`: measure and log times since process creation (not since `main`).
 
 use std::io::Write;
 
@@ -8,7 +8,7 @@ use windows::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
 
 pub struct Timing {
     pub enabled: bool,
-    /// Nach dem ersten Frame mit Inhalt beenden.
+    /// Exit after the first frame with content.
     pub bench: bool,
     created: u64,
     log: Vec<String>,

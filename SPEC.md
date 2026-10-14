@@ -1,66 +1,70 @@
-# RustCommander – Spezifikation
+# RustCommander – Specification
 
-Zwei-Fenster-Dateimanager für Windows. Oberstes Ziel: **rotzeschnell** (Startup und Dateioperationen).
+Dual-pane file manager for Windows. Top priority: **blazing fast** (startup and file operations).
 
-## Leistungsziele
+## Performance targets
 
-| Messpunkt | Ziel |
+| Measurement | Target |
 |---|---|
-| Kaltstart bis erstes gezeichnetes Fenster mit Inhalt | < 100 ms |
-| Ordner mit 10.000 Einträgen laden + anzeigen | < 50 ms |
-| UI-Thread blockiert | nie (auch nicht bei Netzlaufwerken) |
+| Cold start until first frame with content | < 100 ms |
+| Load + display a directory with 10,000 entries | < 50 ms |
+| UI thread blocked | never (not even on network drives) |
 
-Messen: `rustcommander --timing` (loggt nach stderr und `%APPDATA%\RustCommander\timing.log`),
-`rustcommander --bench` (wie `--timing`, beendet sich nach dem ersten Frame mit Inhalt).
+Measure with `rustcommander --timing` (logs to stderr and `%APPDATA%\RustCommander\timing.log`)
+or `rustcommander --bench` (like `--timing`, exits after the first frame with content and reports
+the steady-state frame time).
 
-## Technik
+## Technology
 
-- Nur Windows. Win32-Fenster + Direct2D/DirectWrite, komplett selbst gezeichnet.
-- Einzige Abhängigkeit: `windows`-Crate. Release: LTO, `panic=abort`, `codegen-units=1`.
-- Ordner lesen: `FindFirstFileExW` mit `FindExInfoBasic` + `FIND_FIRST_EX_LARGE_FETCH`,
-  immer im Hintergrund-Thread, abbrechbar. Ladeanzeige erst nach 150 ms.
-- Nur sichtbare Zeilen werden gezeichnet.
-- **Direct2D im Software-Modus** (Standard). Gemessen: Hardware-Target kostet beim Start ~150 ms
-  (D3D + GPU-Treiber laden) und zeichnet nicht schneller. `RC_HARDWARE=1` schaltet zum Vergleich um.
+- Windows only. Win32 window + Direct2D/DirectWrite, everything custom-drawn.
+- Single dependency: the `windows` crate. Release profile: LTO, `panic=abort`, `codegen-units=1`.
+- Directory listing: `FindFirstFileExW` with `FindExInfoBasic` + `FIND_FIRST_EX_LARGE_FETCH`,
+  always on a background thread, cancellable. Loading indicator only after 150 ms.
+- Only visible rows are drawn.
+- **Direct2D in software mode** (default). Measured: the hardware render target costs ~150 ms at
+  startup (loading D3D + GPU driver) and doesn't draw faster. `RC_HARDWARE=1` switches for comparison.
+- `unsafe` lives only in the OS boundary modules (`win.rs`, `gfx.rs`, `fsx.rs`, `main.rs`,
+  `timing.rs`). App logic (`app.rs`, `panel.rs`) is free of `unsafe`. The window procedure guards
+  the app against reentrant access (`AppCell`).
 
-### Messwerte v0.1 (Release, 120 dpi)
+### Measurements v0.1 (release build, 120 dpi)
 
-| | Ergebnis |
+| | Result |
 |---|---|
-| Kaltstart bis Frame mit Inhalt | ~40–45 ms (Hardware-Target: ~175 ms) |
-| Ordner 10.000 Einträge laden + sortieren | 6–8 ms |
-| `C:\Windows\System32` (5.000 Einträge) | ~2 ms |
-| Frame-Zeit 1186×722 DIP / 2752×1081 DIP | ~7 ms / ~12,5 ms |
+| Cold start until frame with content | ~40–50 ms (hardware target: ~175 ms) |
+| Load + sort 10,000 entries | 6–8 ms |
+| `C:\Windows\System32` (5,000 entries) | ~2 ms |
+| Frame time 1186×722 DIP / 2752×1081 DIP | ~7 ms / ~12.5 ms |
 
-## Optik
+## Look
 
-- Eigenes Dark Theme; alle Farben zentral in `theme.rs` (Light kommt später).
-- Normale Windows-Titelleiste, dunkel eingefärbt (DWM).
-- Schrift Segoe UI Variable; Icons als Glyphen aus Segoe Fluent Icons, Farbe nach Dateityp.
-- Spalten: Name (inkl. Endung) | Größe | Datum. (Später einstellbar: Endung als eigene Spalte.)
-- Sortierung: `..` zuerst, Ordner vor Dateien, natürlich & case-insensitiv.
-- Versteckte/System-Dateien: gedimmt.
+- Custom dark theme; all colors centralized in `theme.rs` (light theme comes later).
+- Standard Windows title bar, dark-tinted via DWM.
+- Font: Segoe UI Variable; icons are glyphs from Segoe Fluent Icons, colored by file type.
+- Columns: Name (incl. extension) | Size | Date. (Later configurable: extension as its own column.)
+- Sorting: `..` first, directories before files, natural & case-insensitive.
+- Hidden/system files: dimmed.
+- UI language: German for now.
 
-## Bedienung (v0.1)
+## Controls (v0.1)
 
-| Taste | Aktion |
+| Key | Action |
 |---|---|
-| Tab | Seite wechseln |
-| ↑ ↓ Bild↑ Bild↓ Pos1 Ende | Cursor |
-| Enter / Doppelklick | Ordner öffnen bzw. Datei per Shell öffnen |
-| Backspace, Strg+Bild↑ | Ordner hoch |
-| \ | Laufwerkswurzel (funktioniert auch mit deutschem Layout) |
-| Alt+F1 / Alt+F2 | Laufwerk links / rechts wählen |
-| Strg+L, Klick auf Pfad | Pfad eingeben (Strg+V, Umgebungsvariablen) |
-| Strg+R, F2 | Neu laden |
-| Buchstaben tippen | Schnellsuche (springt zum ersten Treffer), Esc bricht ab |
+| Tab | Switch pane |
+| ↑ ↓ PgUp PgDn Home End | Move cursor |
+| Enter / double-click | Open directory, or open file via shell |
+| Backspace, Ctrl+PgUp | Parent directory |
+| \ | Drive root (also works on German keyboard layouts) |
+| Alt+F1 / Alt+F2 | Choose drive for left / right pane |
+| Ctrl+L, click on path | Edit path (Ctrl+V, environment variables) |
+| Ctrl+R, F2 | Reload |
+| Type letters | Quick search (jumps to first match), Esc cancels |
 
-Beim Start werden die zuletzt offenen Ordner und die Fensterposition wiederhergestellt
+On startup the last directories and the window position are restored
 (`%APPDATA%\RustCommander\config.ini`).
 
-## Bewusst später
+## Deliberately later
 
-Dateioperationen (Kopieren/Verschieben/Löschen) + Markieren, automatisches Neuladen
-(`ReadDirectoryChangesW`), System-Icons (asynchron, gecacht), Live-Filter, Light Theme,
-Einstellungen, Pfad-Schreibweise normalisieren (getippt `c:\windows` → `C:\Windows`),
-nur geänderte Bereiche neu zeichnen (falls Frame-Zeit bei großen Fenstern stört).
+File operations (copy/move/delete) + selection, automatic refresh (`ReadDirectoryChangesW`),
+system icons (async, cached), live filter, light theme, settings, normalizing path casing
+(typed `c:\windows` → `C:\Windows`), partial redraws (if frame time on large windows becomes an issue).

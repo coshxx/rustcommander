@@ -1,4 +1,4 @@
-//! Anwendungszustand, Eingabe und Zeichnen.
+//! Application state, input handling and drawing.
 
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, channel};
@@ -137,7 +137,7 @@ fn drive_info(kind: u32) -> (u16, &'static str) {
     }
 }
 
-/// Eingabe aus der Pfadzeile in einen absoluten Pfad wandeln.
+/// Turn path bar input into an absolute path.
 fn parse_path(input: &[u16], base: &std::path::Path) -> Option<PathBuf> {
     let expanded = win::expand_env(input);
     let mut s = String::from_utf16_lossy(&expanded).trim().trim_matches('"').to_string();
@@ -156,7 +156,7 @@ impl App {
     pub fn new(hwnd: HWND, cfg: &Config, timing: Timing) -> App {
         let (tx, rx) = channel();
         let sink = LoadSink { tx, hwnd: SendHwnd::new(hwnd) };
-        // Lade-Threads vor der Grafik-Initialisierung starten, damit beides parallel läuft.
+        // Start the loader threads before graphics init so both run in parallel.
         let mut panels = [Panel::default(), Panel::default()];
         let home = std::env::var_os("USERPROFILE").map(PathBuf::from);
         let defaults = [Some(PathBuf::from(r"C:\")), home];
@@ -165,8 +165,8 @@ impl App {
             panel.navigate(i, p, None, &sink);
         }
         let mut timing = timing;
-        let gfx = Gfx::new().expect("Direct2D/DirectWrite nicht verfügbar");
-        timing.mark("Direct2D/DirectWrite initialisiert");
+        let gfx = Gfx::new().expect("Direct2D/DirectWrite unavailable");
+        timing.mark("Direct2D/DirectWrite initialized");
         let app = App {
             hwnd,
             gfx,
@@ -209,17 +209,17 @@ impl App {
         while let Ok(l) = self.rx.try_recv() {
             let info = match &l.result {
                 Ok(li) => format!(
-                    "  Ordner {} – {} Einträge in {:.2} ms",
+                    "  dir {} – {} entries in {:.2} ms",
                     li.dir.display(),
                     li.entries.len(),
                     li.elapsed.as_secs_f64() * 1000.0
                 ),
-                Err(e) => format!("  Fehler: {}", e.trim()),
+                Err(e) => format!("  error: {}", e.trim()),
             };
             let p = l.panel;
             if self.panels[p].apply(l.id, l.result) {
                 self.timing.note(info);
-                // Startpfad kaputt (z. B. Laufwerk weg)? Dann auf C:\ ausweichen.
+                // Start path broken (e.g. drive gone)? Fall back to C:\.
                 if self.panels[p].entries.is_empty() && self.panels[p].dir.as_os_str().is_empty() {
                     self.nav(p, PathBuf::from(r"C:\"), None);
                 }
@@ -285,7 +285,7 @@ impl App {
         rect(px + PAD - 4.0, PATH_H - 2.0, POPUP_W, n as f32 * ROW_H + 8.0)
     }
 
-    // ---------- Aktionen ----------
+    // ---------- Actions ----------
 
     fn open_current(&mut self) {
         let a = self.active;
@@ -324,7 +324,7 @@ impl App {
         if let Mode::Drives(d) = std::mem::replace(&mut self.mode, Mode::Normal) {
             if let Some(drive) = d.drives.get(idx) {
                 let root = String::from_utf16_lossy(&drive.root[..3]);
-                // Gleiches Laufwerk: im aktuellen Ordner bleiben.
+                // Same drive: stay in the current directory.
                 if !self.panels[d.panel].dir.starts_with(&root) {
                     self.nav(d.panel, PathBuf::from(root), None);
                 }
@@ -347,9 +347,9 @@ impl App {
         }
     }
 
-    // ---------- Eingabe ----------
+    // ---------- Input ----------
 
-    /// `true` = verarbeitet.
+    /// `true` = handled.
     pub fn on_key(&mut self, vk: VIRTUAL_KEY) -> bool {
         let ctrl = win::key_down(VK_CONTROL);
         let handled = match &mut self.mode {
@@ -535,7 +535,7 @@ impl App {
         self.invalidate();
     }
 
-    // ---------- Zeichnen ----------
+    // ---------- Drawing ----------
 
     pub fn paint(&mut self) {
         if !self.painted {
@@ -545,7 +545,7 @@ impl App {
             return;
         }
         if !self.painted {
-            self.timing.mark("Render-Target bereit");
+            self.timing.mark("render target ready");
         }
         self.layout();
         if self.hint_widths.is_none() {
@@ -576,11 +576,11 @@ impl App {
 
         if !self.painted {
             self.painted = true;
-            self.timing.mark("erster Frame");
+            self.timing.mark("first frame");
         }
         if !self.painted_content && self.panels.iter().all(|p| !p.entries.is_empty()) {
             self.painted_content = true;
-            self.timing.mark("erster Frame mit Inhalt");
+            self.timing.mark("first frame with content");
             if self.timing.bench {
                 self.bench_frames();
                 SendHwnd::new(self.hwnd).post(WM_CLOSE);
@@ -588,7 +588,7 @@ impl App {
         }
     }
 
-    /// Bench: Frame-Zeit im eingeschwungenen Zustand (Cursor wandert, alles neu gezeichnet).
+    /// Bench: steady-state frame time (cursor moves, everything is redrawn).
     fn bench_frames(&mut self) {
         let n = 60;
         let start = std::time::Instant::now();
@@ -606,7 +606,7 @@ impl App {
         }
         let (w, h) = self.gfx.size_dips(self.hwnd);
         let ms = start.elapsed().as_secs_f64() * 1000.0 / n as f64;
-        self.timing.note(format!("  Frame-Zeit: {ms:.2} ms (Ø über {n} Frames, {w:.0}×{h:.0} DIP, {} dpi)", self.gfx.dpi));
+        self.timing.note(format!("  frame time: {ms:.2} ms (avg over {n} frames, {w:.0}×{h:.0} DIP, {} dpi)", self.gfx.dpi));
     }
 
     fn draw_panel(&self, c: &Canvas, i: usize, w: f32, h: f32, caret_x: Option<f32>) {
@@ -616,7 +616,7 @@ impl App {
         let (x, pw) = self.panel_x(i, w);
         let f = c.fonts;
 
-        // Pfadzeile
+        // Path bar
         c.fill(rect(x, 0.0, pw, PATH_H), t.bar_bg);
         if active {
             c.fill(rect(x, PATH_H - 2.0, pw, 2.0), t.accent);
@@ -654,7 +654,7 @@ impl App {
             }
         }
 
-        // Spaltenköpfe
+        // Column headers
         let date_x = x + pw - PAD - DATE_W;
         let size_x = date_x - 14.0 - SIZE_W;
         let name_x = x + PAD + ICON_W + 6.0;
@@ -664,7 +664,7 @@ impl App {
         c.text_str("Geändert", &f.small, rect(date_x, hy, DATE_W, COLS_H), t.text_dim);
         c.fill(rect(x, hy + COLS_H - 1.0, pw, 1.0), t.divider);
 
-        // Zeilen – nur die sichtbaren
+        // Rows – visible ones only
         let (top, lh) = Self::list_area(h);
         c.clip(rect(x, top, pw, lh));
         let end = (p.top + p.rows_visible + 1).min(p.entries.len());
@@ -696,7 +696,7 @@ impl App {
         }
         c.unclip();
 
-        // Scrollbalken (nur Anzeige)
+        // Scrollbar (display only)
         let n = p.entries.len();
         if n > p.rows_visible && lh > 0.0 {
             let th = (lh * p.rows_visible as f32 / n as f32).max(24.0);
@@ -704,7 +704,7 @@ impl App {
             c.fill_round(rect(x + pw - 7.0, ty + 2.0, 4.0, th - 4.0), 2.0, t.scroll_thumb);
         }
 
-        // Statuszeile
+        // Status bar
         let sy = h - KEYBAR_H - STATUS_H;
         c.fill(rect(x, sy, pw, STATUS_H), t.bar_bg);
         c.fill(rect(x, sy, pw, 1.0), t.divider);

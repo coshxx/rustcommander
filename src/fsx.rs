@@ -1,4 +1,4 @@
-//! Ordner einlesen (schnellster Win32-Weg), sortieren, im Hintergrund laden.
+//! Read directories (fastest Win32 way), sort them, load in the background.
 
 use std::cmp::Ordering;
 use std::ffi::OsString;
@@ -30,12 +30,12 @@ pub enum Kind {
 }
 
 pub struct Entry {
-    /// UTF-16 ohne Nullterminator – direkt an DirectWrite übergebbar.
+    /// UTF-16 without null terminator – can be passed straight to DirectWrite.
     pub name: Box<[u16]>,
     pub kind: Kind,
     pub hidden: bool,
     pub size: u64,
-    /// FILETIME (100-ns-Ticks seit 1601, UTC).
+    /// FILETIME (100 ns ticks since 1601, UTC).
     pub mtime: u64,
 }
 
@@ -62,7 +62,7 @@ impl Entry {
 pub struct Listing {
     pub dir: PathBuf,
     pub entries: Vec<Entry>,
-    /// Eintrag, auf den der Cursor soll (z. B. wenn ein Dateipfad eingegeben wurde).
+    /// Entry to put the cursor on (e.g. when a file path was entered).
     pub select: Option<Box<[u16]>>,
     pub dirs: usize,
     pub files: usize,
@@ -74,7 +74,7 @@ pub fn to_wide_z(s: &std::ffi::OsStr) -> Vec<u16> {
     s.encode_wide().chain(std::iter::once(0)).collect()
 }
 
-/// Lange Pfade bekommen den `\\?\`-Präfix, damit MAX_PATH nicht greift.
+/// Long paths get the `\\?\` prefix so MAX_PATH doesn't apply.
 fn long_path(path: &Path) -> Vec<u16> {
     let w: Vec<u16> = path.as_os_str().encode_wide().collect();
     if w.len() < 240 || w.starts_with(&[b'\\' as u16, b'\\' as u16, b'?' as u16]) {
@@ -129,7 +129,7 @@ fn is_digit(c: u16) -> bool {
     (b'0' as u16..=b'9' as u16).contains(&c)
 }
 
-/// Kleinbuchstaben-Faltung; ASCII schnell, Rest über `char::to_lowercase`.
+/// Lowercase folding; fast path for ASCII, the rest via `char::to_lowercase`.
 #[inline]
 pub fn fold(c: u16) -> u32 {
     if c < 128 {
@@ -142,7 +142,7 @@ pub fn fold(c: u16) -> u32 {
     }
 }
 
-/// Natürliche, case-insensitive Sortierung: „file2“ < „file10“.
+/// Natural, case-insensitive ordering: "file2" < "file10".
 pub fn natural_cmp(a: &[u16], b: &[u16]) -> Ordering {
     let (mut i, mut j) = (0, 0);
     while i < a.len() && j < b.len() {
@@ -180,7 +180,7 @@ pub fn starts_with_ci(name: &[u16], prefix: &[u16]) -> bool {
     name.len() >= prefix.len() && name.iter().zip(prefix).all(|(&a, &b)| fold(a) == fold(b))
 }
 
-/// Ist `path` eine Datei, wird stattdessen ihr Ordner geladen und die Datei ausgewählt.
+/// If `path` is a file, its directory is loaded instead and the file gets selected.
 pub fn load(path: &Path, cancel: &AtomicBool) -> Result<Listing, String> {
     let start = Instant::now();
     let wpath = to_wide_z(path.as_os_str());
@@ -223,7 +223,7 @@ pub fn load(path: &Path, cancel: &AtomicBool) -> Result<Listing, String> {
             unsafe {
                 let _ = FindClose(handle);
             }
-            return Err("abgebrochen".into());
+            return Err("cancelled".into());
         }
         let len = data.cFileName.iter().position(|&c| c == 0).unwrap_or(data.cFileName.len());
         let name = &data.cFileName[..len];
@@ -265,7 +265,7 @@ pub fn load(path: &Path, cancel: &AtomicBool) -> Result<Listing, String> {
     Ok(Listing { dir, entries, select, dirs, files, bytes, elapsed: start.elapsed() })
 }
 
-/// Ein laufender Ladevorgang; `cancel` wird gesetzt, sobald er überholt ist.
+/// A running load; `cancel` is set as soon as it is superseded.
 pub struct Pending {
     pub id: u64,
     pub path: PathBuf,

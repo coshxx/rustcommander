@@ -1,4 +1,4 @@
-//! Alle Farben an einer Stelle. Ein Light-Theme ist später nur ein zweiter `Theme`-Wert.
+//! All colors in one place. A light theme later is just a second `Theme` value.
 
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
@@ -18,7 +18,7 @@ pub const fn rgba(hex: u32, a: f32) -> Color {
 }
 
 pub struct Theme {
-    /// Hintergrund hinter allem; auch als GDI-Hintergrund gegen weißes Aufblitzen.
+    /// Background behind everything; also the GDI background to avoid a white flash.
     pub bg: u32,
     pub panel_bg: Color,
     pub row_alt: Color,
@@ -78,7 +78,7 @@ pub const DARK: Theme = Theme {
     icon_doc: rgb(0xb5bcc9),
 };
 
-/// COLORREF (0x00BBGGRR) aus 0xRRGGBB.
+/// COLORREF (0x00BBGGRR) from 0xRRGGBB.
 pub const fn colorref(hex: u32) -> u32 {
     ((hex & 0xff) << 16) | (hex & 0xff00) | ((hex >> 16) & 0xff)
 }

@@ -1,4 +1,4 @@
-//! Winzige `key=value`-Datei unter `%APPDATA%\RustCommander\config.ini`.
+//! Tiny `key=value` file at `%APPDATA%\RustCommander\config.ini`.
 
 use std::path::PathBuf;
 
@@ -6,7 +6,7 @@ use std::path::PathBuf;
 pub struct Config {
     pub paths: [Option<PathBuf>; 2],
     pub active: usize,
-    /// Normale Fensterposition (links, oben, rechts, unten) + maximiert.
+    /// Normal window position (left, top, right, bottom) + maximized.
     pub window: Option<([i32; 4], bool)>,
 }
 

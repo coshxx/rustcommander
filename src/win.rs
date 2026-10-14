@@ -1,5 +1,5 @@
-//! Sichere Hüllen um die Win32-Aufrufe, die die App-Logik braucht.
-//! Ziel: `app.rs` und `panel.rs` kommen ohne `unsafe` aus.
+//! Safe wrappers around the Win32 calls the app logic needs.
+//! Goal: `app.rs` and `panel.rs` contain no `unsafe`.
 
 use std::path::{Path, PathBuf};
 
@@ -34,9 +34,9 @@ pub fn kill_timer(hwnd: HWND, id: usize) {
     }
 }
 
-/// HWND als Zahl, damit es in andere Threads darf (`HWND` ist nicht `Send`).
-/// `PostMessageW` ist aus jedem Thread erlaubt; ein inzwischen zerstörtes Fenster
-/// lässt den Aufruf nur fehlschlagen.
+/// HWND as a plain number so it can cross threads (`HWND` is not `Send`).
+/// `PostMessageW` is allowed from any thread; if the window is gone by then,
+/// the call merely fails.
 #[derive(Clone, Copy)]
 pub struct SendHwnd(isize);
 
@@ -56,7 +56,7 @@ pub fn key_down(vk: VIRTUAL_KEY) -> bool {
     unsafe { GetKeyState(vk.0 as i32) < 0 }
 }
 
-/// FILETIME (UTC, 100-ns-Ticks) in lokale Zeit.
+/// FILETIME (UTC, 100 ns ticks) to local time.
 pub fn local_time(t: u64) -> Option<SYSTEMTIME> {
     let ft = FILETIME { dwLowDateTime: t as u32, dwHighDateTime: (t >> 32) as u32 };
     let (mut st, mut lt) = (SYSTEMTIME::default(), SYSTEMTIME::default());
@@ -68,9 +68,9 @@ pub fn local_time(t: u64) -> Option<SYSTEMTIME> {
 }
 
 pub struct Drive {
-    /// `C:\` ohne Nullterminator.
+    /// `C:\` without null terminator.
     pub root: [u16; 3],
-    /// Rückgabe von `GetDriveTypeW` (2 = Wechseldatenträger, 4 = Netz, 5 = CD, 6 = RAM).
+    /// Result of `GetDriveTypeW` (2 = removable, 4 = network, 5 = CD, 6 = RAM disk).
     pub kind: u32,
 }
 
@@ -95,8 +95,8 @@ pub fn clipboard_text(hwnd: HWND) -> Option<Vec<u16>> {
             let hg = HGLOBAL(h.0);
             let p = GlobalLock(hg) as *const u16;
             if !p.is_null() {
-                // SAFETY: CF_UNICODETEXT ist laut API-Vertrag nullterminiert, und der
-                // Speicher bleibt bis GlobalUnlock gesperrt und gültig.
+                // SAFETY: CF_UNICODETEXT is null-terminated per the API contract, and the
+                // memory stays locked and valid until GlobalUnlock.
                 let mut len = 0;
                 while *p.add(len) != 0 {
                     len += 1;
@@ -110,7 +110,7 @@ pub fn clipboard_text(hwnd: HWND) -> Option<Vec<u16>> {
     }
 }
 
-/// `%VAR%` in einem Pfad auflösen; bei Fehler unverändert.
+/// Expand `%VAR%` in a path; returns the input unchanged on failure.
 pub fn expand_env(input: &[u16]) -> Vec<u16> {
     let mut z = input.to_vec();
     z.push(0);
@@ -124,8 +124,8 @@ pub fn expand_env(input: &[u16]) -> Vec<u16> {
     }
 }
 
-/// Datei mit dem Standardprogramm öffnen. Läuft im eigenen Thread, weil
-/// ShellExecute bei manchen Handlern spürbar blockiert.
+/// Open a file with its default program. Runs on its own thread because
+/// ShellExecute blocks noticeably with some handlers.
 pub fn shell_open(path: PathBuf) {
     std::thread::spawn(move || {
         let file = to_wide_z(path.as_os_str());

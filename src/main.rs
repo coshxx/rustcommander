@@ -53,19 +53,19 @@ fn main() {
     }
     let cfg = Config::load();
     let hwnd = create_window();
-    timing.mark("Fenster erzeugt");
+    timing.mark("window created");
 
     let cell = Box::into_raw(Box::new(AppCell::new(App::new(hwnd, &cfg, timing))));
-    // SAFETY: `cell` stammt aus `Box::into_raw` und wird erst nach der Nachrichtenschleife
-    // freigegeben – dann ist das Fenster zerstört und `wndproc` sieht den Zeiger nie wieder.
+    // SAFETY: `cell` comes from `Box::into_raw` and is only freed after the message loop –
+    // by then the window is destroyed and `wndproc` never sees the pointer again.
     let cell_ref = unsafe { &*cell };
     cell_ref.with(|app| {
         app.gfx.set_dpi(unsafe { GetDpiForWindow(hwnd) } as f32);
     });
     unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, cell as isize) };
-    cell_ref.with(|app| app.timing.mark("vor ShowWindow"));
+    cell_ref.with(|app| app.timing.mark("before ShowWindow"));
     show_window(hwnd, &cfg);
-    cell_ref.with(|app| app.timing.mark("nach ShowWindow"));
+    cell_ref.with(|app| app.timing.mark("after ShowWindow"));
 
     let mut msg = MSG::default();
     unsafe {
@@ -74,16 +74,16 @@ fn main() {
             DispatchMessageW(&msg);
         }
     }
-    // SAFETY: siehe oben; die Schleife ist beendet, das Fenster zerstört.
+    // SAFETY: see above; the loop has ended and the window is destroyed.
     let cell = unsafe { Box::from_raw(cell) };
     cell.with(|app| app.timing.flush());
 }
 
-/// Die App hinter einer Sperre. Win32 stellt manche Nachrichten synchron zu, während wir
-/// noch in einem Handler stecken (Dialoge, `SetWindowPos`, `DestroyWindow`, modale Schleifen).
-/// Ohne Sperre entstünden dabei zwei `&mut App` gleichzeitig – undefiniertes Verhalten.
-/// So wird der verschachtelte Zugriff erkannt: im Debug-Build Panic (Fehler finden),
-/// im Release wird die Nachricht an `DefWindowProcW` durchgereicht.
+/// The app behind a lock. Win32 delivers some messages synchronously while we are still
+/// inside a handler (dialogs, `SetWindowPos`, `DestroyWindow`, modal loops). Without the
+/// lock that would create two `&mut App` at once – undefined behavior. Instead, nested
+/// access is detected: debug builds panic (to find the bug), release builds pass the
+/// message on to `DefWindowProcW`.
 struct AppCell {
     busy: Cell<bool>,
     app: UnsafeCell<App>,
@@ -94,10 +94,10 @@ impl AppCell {
         AppCell { busy: Cell::new(false), app: UnsafeCell::new(app) }
     }
 
-    /// `None`, wenn die App gerade schon benutzt wird.
+    /// `None` if the app is already in use.
     fn with<R>(&self, f: impl FnOnce(&mut App) -> R) -> Option<R> {
         if self.busy.replace(true) {
-            debug_assert!(false, "verschachtelter Zugriff auf App (Reentranz in wndproc)");
+            debug_assert!(false, "nested access to App (reentrancy in wndproc)");
             return None;
         }
         struct Release<'a>(&'a Cell<bool>);
@@ -107,8 +107,8 @@ impl AppCell {
             }
         }
         let _release = Release(&self.busy);
-        // SAFETY: `busy` stellt sicher, dass keine zweite Referenz existiert; `AppCell`
-        // ist nicht `Sync`, also greift nur der UI-Thread zu.
+        // SAFETY: `busy` guarantees no second reference exists; `AppCell` is not `Sync`,
+        // so only the UI thread accesses it.
         Some(f(unsafe { &mut *self.app.get() }))
     }
 }
@@ -122,7 +122,7 @@ fn create_window() -> HWND {
             lpfnWndProc: Some(wndproc),
             hInstance: instance.into(),
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
-            // Dunkler GDI-Hintergrund: kein weißes Aufblitzen vor dem ersten Frame.
+            // Dark GDI background: no white flash before the first frame.
             hbrBackground: CreateSolidBrush(COLORREF(theme::colorref(theme::DARK.bg))),
             lpszClassName: w!("RustCommanderWnd"),
             ..Default::default()
@@ -197,21 +197,21 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
     if ptr.is_null() {
         return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
     }
-    // SAFETY: siehe `main` – der Zeiger lebt, solange das Fenster existiert.
+    // SAFETY: see `main` – the pointer lives as long as the window exists.
     let cell = unsafe { &*ptr };
     let default = || unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
     let done = |handled: Option<bool>| if handled == Some(true) { LRESULT(0) } else { default() };
 
     match msg {
         WM_PAINT => {
-            // BeginPaint/EndPaint immer, sonst kommt WM_PAINT endlos wieder.
+            // Always BeginPaint/EndPaint, otherwise WM_PAINT keeps coming back.
             let mut ps = PAINTSTRUCT::default();
             unsafe { BeginPaint(hwnd, &mut ps) };
             cell.with(|app| app.paint());
             let _ = unsafe { EndPaint(hwnd, &ps) };
             LRESULT(0)
         }
-        // Wir zeichnen alles selbst; GDI soll nicht übermalen.
+        // We draw everything ourselves; GDI must not paint over it.
         WM_ERASEBKGND => LRESULT(1),
         WM_SIZE => {
             cell.with(|app| {
@@ -222,9 +222,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
         }
         WM_DPICHANGED => {
             cell.with(|app| app.gfx.set_dpi((wp.0 & 0xffff) as f32));
-            // SAFETY: Bei WM_DPICHANGED zeigt lParam laut API auf das vorgeschlagene RECT.
+            // SAFETY: for WM_DPICHANGED, lParam points to the suggested RECT per the API.
             let r = unsafe { *(lp.0 as *const RECT) };
-            // Löst synchron WM_SIZE aus – daher außerhalb von `with`.
+            // Sends WM_SIZE synchronously – hence outside of `with`.
             let _ = unsafe {
                 SetWindowPos(
                     hwnd,
@@ -240,7 +240,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
         }
         WM_KEYDOWN => done(cell.with(|app| app.on_key(VIRTUAL_KEY(wp.0 as u16)))),
         WM_SYSKEYDOWN => done(cell.with(|app| app.on_syskey(VIRTUAL_KEY(wp.0 as u16)))),
-        // Alt alleine soll nicht ins (nicht vorhandene) Menü springen.
+        // Alt alone must not enter the (non-existent) menu.
         WM_SYSCOMMAND if (wp.0 & 0xfff0) as u32 == SC_KEYMENU && lp.0 == 0 => LRESULT(0),
         WM_CHAR => done(cell.with(|app| {
             app.on_char(wp.0 as u16);
@@ -276,7 +276,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
                     app.config(hwnd).save();
                 }
             });
-            // Löst synchron WM_DESTROY aus – daher außerhalb von `with`.
+            // Sends WM_DESTROY synchronously – hence outside of `with`.
             let _ = unsafe { DestroyWindow(hwnd) };
             LRESULT(0)
         }

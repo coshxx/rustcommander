@@ -1,4 +1,4 @@
-//! Zustand einer Dateiliste: Ordner, Einträge, Cursor, Scrollposition, Schnellsuche.
+//! State of one file list: directory, entries, cursor, scroll position, quick search.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -13,7 +13,7 @@ pub const WM_APP_LOADED: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP +
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
-/// Alles, was ein Lade-Thread braucht, um sein Ergebnis zurückzumelden.
+/// Everything a loader thread needs to report its result back.
 #[derive(Clone)]
 pub struct LoadSink {
     pub tx: Sender<Loaded>,
@@ -26,7 +26,7 @@ pub struct Panel {
     pub entries: Vec<Entry>,
     pub cursor: usize,
     pub top: usize,
-    /// Wird beim Layout gesetzt.
+    /// Set during layout.
     pub rows_visible: usize,
     pub pending: Option<Pending>,
     pub search: Vec<u16>,
@@ -84,7 +84,7 @@ impl Panel {
         }
     }
 
-    /// Ergebnis übernehmen, falls es noch das aktuelle ist. `true` = übernommen.
+    /// Apply a result if it is still the current one. `true` = applied.
     pub fn apply(&mut self, id: u64, result: Result<Listing, String>) -> bool {
         let Some(p) = self.pending.take_if(|p| p.id == id) else {
             return false;
@@ -156,8 +156,8 @@ impl Panel {
         self.top = self.top.min(max_top);
     }
 
-    /// Schnellsuche: Zeichen anhängen und zum ersten passenden Eintrag springen.
-    /// Gibt es keinen Treffer, wird das Zeichen verworfen.
+    /// Quick search: append a character and jump to the first matching entry.
+    /// If nothing matches, the character is dropped.
     pub fn search_push(&mut self, c: u16) {
         self.search.push(c);
         if !self.search_jump() {
