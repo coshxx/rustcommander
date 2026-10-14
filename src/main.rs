@@ -4,6 +4,7 @@ mod app;
 mod config;
 mod fsx;
 mod gfx;
+mod mask;
 mod ops;
 mod panel;
 mod theme;

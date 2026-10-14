@@ -183,6 +183,25 @@ impl Panel {
         }
     }
 
+    /// Set the mark of every entry `pick` accepts (never `..`); returns how many matched.
+    pub fn mark_where(&mut self, marked: bool, pick: impl Fn(&Entry) -> bool) -> usize {
+        let mut n = 0;
+        for e in self.entries.iter_mut().filter(|e| e.kind != Kind::Parent) {
+            if pick(e) {
+                e.marked = marked;
+                n += 1;
+            }
+        }
+        n
+    }
+
+    /// Invert the marks of all files; directories keep theirs.
+    pub fn invert_file_marks(&mut self) {
+        for e in self.entries.iter_mut().filter(|e| !e.is_dir()) {
+            e.marked = !e.marked;
+        }
+    }
+
     pub fn clear_marks(&mut self) {
         for e in &mut self.entries {
             e.marked = false;

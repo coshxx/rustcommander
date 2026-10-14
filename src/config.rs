@@ -8,6 +8,8 @@ pub struct Config {
     pub active: usize,
     /// Normal window position (left, top, right, bottom) + maximized.
     pub window: Option<([i32; 4], bool)>,
+    /// Last file mask for marking (Num+ / Num−).
+    pub mask: Option<String>,
 }
 
 /// `RC_CONFIG_DIR` overrides the location (used for tests, keeps the real config untouched).
@@ -33,6 +35,7 @@ impl Config {
             match k.trim() {
                 "left" => cfg.paths[0] = Some(PathBuf::from(v.trim())),
                 "right" => cfg.paths[1] = Some(PathBuf::from(v.trim())),
+                "mask" => cfg.mask = Some(v.trim().to_string()),
                 "active" => cfg.active = (v.trim() == "1") as usize,
                 "window" => {
                     let n: Vec<i32> = v.split(',').filter_map(|s| s.trim().parse().ok()).collect();
@@ -57,6 +60,9 @@ impl Config {
         out += &format!("active={}\n", self.active);
         if let Some((r, max)) = self.window {
             out += &format!("window={},{},{},{},{}\n", r[0], r[1], r[2], r[3], max as i32);
+        }
+        if let Some(m) = &self.mask {
+            out += &format!("mask={m}\n");
         }
         let _ = std::fs::create_dir_all(dir);
         let _ = std::fs::write(file, out);

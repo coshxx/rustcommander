@@ -11,6 +11,7 @@ use windows::Win32::UI::WindowsAndMessaging::{WM_APP, WM_CLOSE};
 use crate::config::Config;
 use crate::fsx::{self, Kind, Loaded};
 use crate::gfx::{Canvas, Gfx, Rect, rect};
+use crate::mask::Mask;
 use crate::ops::{self, Answer, Job};
 use crate::panel::{Applied, LoadSink, Panel};
 use crate::theme::{Color, DARK, Theme};
@@ -51,9 +52,10 @@ const CARD_W: f32 = 400.0;
 const SCROLL_ZONE_W: f32 = 14.0;
 const THUMB_MIN_H: f32 = 24.0;
 
-const HINTS: [(&str, &str); 9] = [
+const HINTS: [(&str, &str); 10] = [
     ("Tab", "Seite"),
     ("Einfg", "Markieren"),
+    ("Num+", "Auswahl"),
     ("F5", "Kopieren"),
     ("F6", "Verschieben"),
     ("⇧F6", "Umbenennen"),
@@ -67,17 +69,30 @@ const HINTS: [(&str, &str); 9] = [
 struct TextInput {
     text: Vec<u16>,
     caret: usize,
+    /// Whole text selected: typing replaces it.
+    all: bool,
 }
 
 impl TextInput {
     fn new(text: Vec<u16>) -> TextInput {
         let caret = text.len();
-        TextInput { text, caret }
+        TextInput { text, caret, all: false }
+    }
+
+    fn selected(text: Vec<u16>) -> TextInput {
+        TextInput { all: !text.is_empty(), ..TextInput::new(text) }
     }
 
     /// Editing keys; `true` = handled.
     fn key(&mut self, vk: VIRTUAL_KEY, ctrl: bool, hwnd: HWND) -> bool {
+        let all = std::mem::take(&mut self.all);
         match vk {
+            VK_LEFT if all => self.caret = 0,
+            VK_RIGHT if all => self.caret = self.text.len(),
+            VK_BACK | VK_DELETE if all => {
+                self.text.clear();
+                self.caret = 0;
+            }
             VK_LEFT => self.caret = self.caret.saturating_sub(1),
             VK_RIGHT => self.caret = (self.caret + 1).min(self.text.len()),
             VK_HOME => self.caret = 0,
@@ -94,6 +109,10 @@ impl TextInput {
                 }
             }
             VK_V if ctrl => {
+                if all {
+                    self.text.clear();
+                    self.caret = 0;
+                }
                 if let Some(clip) = win::clipboard_text(hwnd) {
                     let clip: Vec<u16> = clip.into_iter().filter(|&c| c >= 0x20).collect();
                     let n = clip.len();
@@ -101,16 +120,20 @@ impl TextInput {
                     self.caret += n;
                 }
             }
-            VK_A if ctrl => {
-                self.text.clear();
-                self.caret = 0;
+            VK_A if ctrl => self.all = !self.text.is_empty(),
+            _ => {
+                self.all = all;
+                return false;
             }
-            _ => return false,
         }
         true
     }
 
     fn insert(&mut self, c: u16) {
+        if std::mem::take(&mut self.all) {
+            self.text.clear();
+            self.caret = 0;
+        }
         self.text.insert(self.caret, c);
         self.caret += 1;
     }
@@ -133,6 +156,8 @@ enum DialogKind {
     Delete { recycle: bool },
     Rename,
     MkDir,
+    /// Mark (`add`) or unmark entries by file mask.
+    Select { add: bool },
 }
 
 impl DialogKind {
@@ -144,6 +169,8 @@ impl DialogKind {
             DialogKind::Delete { recycle: false } => "Endgültig löschen",
             DialogKind::Rename => "Umbenennen",
             DialogKind::MkDir => "Neuer Ordner",
+            DialogKind::Select { add: true } => "Markieren",
+            DialogKind::Select { add: false } => "Markierung aufheben",
         }
     }
 }
@@ -230,6 +257,10 @@ pub struct App {
     drag_timer: bool,
     /// Panel whose scrollbar is under the mouse.
     hover_bar: Option<usize>,
+    /// Last mask used for Num+ / Num−.
+    mask: String,
+    /// The key that just opened a dialog also produces a WM_CHAR (e.g. Num+ → '+'): drop it.
+    eat_char: bool,
     painted: bool,
     painted_content: bool,
 }
@@ -349,6 +380,8 @@ impl App {
             drag: None,
             drag_timer: false,
             hover_bar: None,
+            mask: cfg.mask.clone().unwrap_or_else(|| "*.*".into()),
+            eat_char: false,
             painted: false,
             painted_content: false,
         };
@@ -357,7 +390,7 @@ impl App {
     }
 
     pub fn config(&self, hwnd: HWND) -> Config {
-        let mut cfg = Config { active: self.active, ..Default::default() };
+        let mut cfg = Config { active: self.active, mask: Some(self.mask.clone()), ..Default::default() };
         for i in 0..2 {
             if !self.panels[i].dir.as_os_str().is_empty() {
                 cfg.paths[i] = Some(self.panels[i].dir.clone());
@@ -653,7 +686,7 @@ impl App {
     }
 
     fn open_dialog(&mut self, kind: DialogKind) {
-        if self.job.is_some() {
+        if self.job.is_some() && !matches!(kind, DialogKind::Select { .. }) {
             self.notify("Es läuft bereits ein Vorgang".into(), Tone::Error);
             return;
         }
@@ -688,14 +721,18 @@ impl App {
                     _ => name.len(),
                 };
                 let msg = format!("„{}“ umbenennen in:", String::from_utf16_lossy(&name));
-                (vec![p.dir.join(e.os_name())], msg, Some(TextInput { text: name, caret }))
+                (vec![p.dir.join(e.os_name())], msg, Some(TextInput { text: name, caret, all: false }))
             }
             DialogKind::MkDir => {
                 let msg = format!("Neuer Ordner in {}:", p.dir.display());
                 (Vec::new(), msg, Some(TextInput::new(Vec::new())))
             }
+            DialogKind::Select { .. } => {
+                let msg = "Maske, z. B. *.bmp;*.png · Ordner: \\ am Ende · | schließt aus".to_string();
+                (Vec::new(), msg, Some(TextInput::selected(wide(&self.mask))))
+            }
         };
-        if sources.is_empty() && kind != DialogKind::MkDir {
+        if sources.is_empty() && !matches!(kind, DialogKind::MkDir | DialogKind::Select { .. }) {
             return;
         }
         self.panels[a].search.clear();
@@ -706,7 +743,12 @@ impl App {
         let Mode::Dialog(d) = std::mem::replace(&mut self.mode, Mode::Normal) else { return };
         let dir = self.panels[d.panel].dir.clone();
         let input = d.input.as_ref().map(|i| i.string().trim().to_string()).unwrap_or_default();
+        if let DialogKind::Select { add } = d.kind {
+            self.apply_mask(d.panel, input, add);
+            return;
+        }
         let job = match d.kind {
+            DialogKind::Select { .. } => return,
             DialogKind::Copy | DialogKind::Move => {
                 let Some(dest) = parse_path(&wide(&input), &dir) else { return };
                 if d.kind == DialogKind::Copy {
@@ -738,10 +780,22 @@ impl App {
         self.start_job(job, d.kind.title(), d.panel);
     }
 
+    fn apply_mask(&mut self, panel: usize, input: String, add: bool) {
+        let mask = Mask::parse(&input);
+        let n = self.panels[panel].mark_where(add, |e| mask.matches(&e.name, e.is_dir()));
+        if n == 0 {
+            self.notify(format!("Keine Treffer für „{input}“"), Tone::Info);
+        }
+        if !input.is_empty() {
+            self.mask = input;
+        }
+    }
+
     // ---------- Input ----------
 
     /// `true` = handled.
     pub fn on_key(&mut self, vk: VIRTUAL_KEY) -> bool {
+        self.eat_char = false;
         let ctrl = win::key_down(VK_CONTROL);
         let shift = win::key_down(VK_SHIFT);
         let hwnd = self.hwnd;
@@ -858,6 +912,19 @@ impl App {
                 p.move_cursor(1);
             }
             VK_A if ctrl => p.mark_all(),
+            // Numpad, like Total Commander. The main row's + and - stay quick search characters.
+            VK_ADD if ctrl => {
+                p.mark_where(true, |_| true);
+            }
+            VK_SUBTRACT if ctrl => p.clear_marks(),
+            VK_ADD | VK_SUBTRACT => {
+                self.eat_char = true;
+                self.open_dialog(DialogKind::Select { add: vk == VK_ADD });
+            }
+            VK_MULTIPLY => {
+                self.eat_char = true;
+                p.invert_file_marks();
+            }
             VK_BACK if !p.search.is_empty() => p.search_pop(),
             VK_BACK => p.go_up(a, &self.sink),
             VK_ESCAPE => {
@@ -896,6 +963,9 @@ impl App {
     }
 
     pub fn on_char(&mut self, c: u16) {
+        if std::mem::take(&mut self.eat_char) {
+            return;
+        }
         if c < 0x20 || c == 0x7f {
             return;
         }
@@ -1236,6 +1306,11 @@ impl App {
         let inner = rect(r.left + 6.0, r.top, r.right - r.left - 12.0, r.bottom - r.top);
         let shift = (caret_x - (inner.right - inner.left) + 4.0).max(0.0);
         c.clip(inner);
+        if input.all {
+            let tw = self.gfx.measure(&input.text, &c.fonts.name);
+            let sel = rect(inner.left - shift - 1.0, inner.top + 5.0, tw + 2.0, inner.bottom - inner.top - 10.0);
+            c.fill_round(sel, 2.0, t.cursor_active);
+        }
         c.text(&input.text, &c.fonts.name, rect(inner.left - shift, inner.top, 10000.0, inner.bottom - inner.top), t.text);
         let caret = inner.left - shift + caret_x;
         c.fill(rect(caret, inner.top + 5.0, 1.5, inner.bottom - inner.top - 10.0), t.accent);

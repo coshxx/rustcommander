@@ -62,6 +62,9 @@ the steady-state frame time).
 | Insert, Space | Toggle mark and move down (Space only when no quick search is active) |
 | Shift+↑ / Shift+↓ | Toggle mark and move |
 | Ctrl+A | Mark all / unmark all |
+| Num+ / Num− | Mark / unmark by file mask (small dialog, last mask preselected) |
+| Ctrl+Num+ / Ctrl+Num− | Mark all / unmark all, no dialog |
+| Num* | Invert marks of files |
 | F5 / F6 | Copy / move marked entries (or the one under the cursor) to the other pane |
 | Shift+F6 | Rename |
 | F7 | New directory (`a\b` creates nested directories) |
@@ -83,6 +86,14 @@ Auto-refresh keeps the scroll position as well; only navigation scrolls to the c
 
 On startup the last directories and the window position are restored
 (`%APPDATA%\RustCommander\config.ini`).
+
+### File masks (Num+ / Num−)
+
+`*` and `?`, case-insensitive; several masks separated by `;` or spaces (`"…"` keeps spaces);
+`|` starts the excludes (`*.* | *.bak`). Masks apply to files only, unless they end in `\`
+(`*\` = all directories). A mask without wildcards means "contains". `*.*` also matches names
+without a dot. Num+ adds to the existing marks, Num− only removes matches. The main keyboard's
+`+`/`-` stay quick search characters. The last mask is saved in `config.ini`.
 
 ## File operations
 
