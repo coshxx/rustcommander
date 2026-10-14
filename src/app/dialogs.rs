@@ -77,13 +77,13 @@ impl App {
     }
 
     pub(crate) fn choose_drive(&mut self, idx: usize) {
-        if let Mode::Drives(d) = std::mem::replace(&mut self.mode, Mode::Normal) {
-            if let Some(drive) = d.drives.get(idx) {
-                let root = String::from_utf16_lossy(&drive.root[..3]);
-                // Same drive: stay in the current directory.
-                if !self.panels[d.panel].dir.starts_with(&root) {
-                    self.navigate(d.panel, PathBuf::from(root), None);
-                }
+        if let Mode::Drives(d) = std::mem::replace(&mut self.mode, Mode::Normal)
+            && let Some(drive) = d.drives.get(idx)
+        {
+            let root = String::from_utf16_lossy(&drive.root[..3]);
+            // Same drive: stay in the current directory.
+            if !self.panels[d.panel].dir.starts_with(&root) {
+                self.navigate(d.panel, PathBuf::from(root), None);
             }
         }
     }
@@ -95,10 +95,10 @@ impl App {
     }
 
     pub(crate) fn commit_path_edit(&mut self) {
-        if let Mode::PathEdit { panel, input } = std::mem::replace(&mut self.mode, Mode::Normal) {
-            if let Some(p) = parse_path(&input.text, &self.panels[panel].dir) {
-                self.navigate(panel, p, None);
-            }
+        if let Mode::PathEdit { panel, input } = std::mem::replace(&mut self.mode, Mode::Normal)
+            && let Some(p) = parse_path(&input.text, &self.panels[panel].dir)
+        {
+            self.navigate(panel, p, None);
         }
     }
 

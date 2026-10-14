@@ -174,15 +174,15 @@ fn clear_readonly(path: &Path) {
 }
 
 fn same_name_ignoring_case(a: &Path, b: &Path) -> bool {
-    a.as_os_str().to_ascii_lowercase() == b.as_os_str().to_ascii_lowercase()
+    a.as_os_str().eq_ignore_ascii_case(b.as_os_str())
 }
 
 impl Worker {
     fn send(&self, ev: Event) {
-        if self.events.send(ev).is_ok() {
-            if let Some((hwnd, msg)) = self.notify {
-                hwnd.post(msg);
-            }
+        if self.events.send(ev).is_ok()
+            && let Some((hwnd, msg)) = self.notify
+        {
+            hwnd.post(msg);
         }
     }
 
@@ -277,11 +277,12 @@ impl Worker {
         // Several sources, or a destination ending in `\`, always mean "into this directory".
         let ends_with_sep = dest.as_os_str().to_string_lossy().ends_with(['\\', '/']);
         let many = sources.len() > 1 || ends_with_sep;
-        if many && !dest.exists() {
-            if let Err(e) = std::fs::create_dir_all(dest) {
-                self.error(dest, error_text(&e));
-                return Ok(());
-            }
+        if many
+            && !dest.exists()
+            && let Err(e) = std::fs::create_dir_all(dest)
+        {
+            self.error(dest, error_text(&e));
+            return Ok(());
         }
         let fast_move = is_move && sources.iter().all(|s| same_volume(s, dest));
         if fast_move {

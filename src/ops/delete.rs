@@ -14,11 +14,11 @@ use crate::files::names::to_utf16_nul;
 fn count_no_follow(path: &Path, depth: usize, files: &mut u64) {
     let Ok(m) = std::fs::symlink_metadata(path) else { return };
     if m.is_dir() && !is_reparse(&m) {
-        if depth < MAX_DEPTH {
-            if let Ok(rd) = std::fs::read_dir(path) {
-                for e in rd.flatten() {
-                    count_no_follow(&e.path(), depth + 1, files);
-                }
+        if depth < MAX_DEPTH
+            && let Ok(rd) = std::fs::read_dir(path)
+        {
+            for e in rd.flatten() {
+                count_no_follow(&e.path(), depth + 1, files);
             }
         }
     } else if !m.is_dir() {

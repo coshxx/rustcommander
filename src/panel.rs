@@ -111,10 +111,10 @@ impl Panel {
     }
 
     pub fn go_root(&mut self, index: usize, sink: &LoadSink) {
-        if let Some(root) = self.dir.ancestors().last() {
-            if root != self.dir {
-                self.navigate(index, root.to_path_buf(), None, sink);
-            }
+        if let Some(root) = self.dir.ancestors().last()
+            && root != self.dir
+        {
+            self.navigate(index, root.to_path_buf(), None, sink);
         }
     }
 
@@ -173,10 +173,10 @@ impl Panel {
     // ---------- marks ----------
 
     pub fn toggle_mark(&mut self) {
-        if let Some(e) = self.entries.get_mut(self.cursor) {
-            if e.kind != Kind::Parent {
-                e.marked = !e.marked;
-            }
+        if let Some(e) = self.entries.get_mut(self.cursor)
+            && e.kind != Kind::Parent
+        {
+            e.marked = !e.marked;
         }
     }
 
@@ -190,10 +190,10 @@ impl Panel {
 
     /// Set the mark of one entry (`..` is never marked).
     pub fn set_mark(&mut self, i: usize, marked: bool) {
-        if let Some(e) = self.entries.get_mut(i) {
-            if e.kind != Kind::Parent {
-                e.marked = marked;
-            }
+        if let Some(e) = self.entries.get_mut(i)
+            && e.kind != Kind::Parent
+        {
+            e.marked = marked;
         }
     }
 

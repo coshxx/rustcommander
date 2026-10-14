@@ -34,9 +34,9 @@ impl App {
     }
 
     pub fn on_job_event(&mut self) {
-        loop {
-            let Some(job) = &mut self.job else { break };
-            let Ok(ev) = job.handle.events.try_recv() else { break };
+        while let Some(job) = &mut self.job
+            && let Ok(ev) = job.handle.events.try_recv()
+        {
             match ev {
                 ops::Event::Progress(p) => job.progress = p,
                 ops::Event::Conflict(path) => self.mode = Mode::Conflict(path),

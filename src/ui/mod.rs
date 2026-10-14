@@ -56,7 +56,6 @@ impl App {
             Mode::Conflict(path) => self.draw_conflict(&c, path, w, h),
             _ => {}
         }
-        drop(c);
         self.gfx.end();
 
         if !self.painted {
@@ -85,7 +84,6 @@ impl App {
                 self.draw_panel(&c, p, w, h, None);
             }
             self.draw_keybar(&c, w, h);
-            drop(c);
             self.gfx.end();
         }
         let (w, h) = self.gfx.size_dips(self.hwnd);

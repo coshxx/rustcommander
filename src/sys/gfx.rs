@@ -198,10 +198,10 @@ impl Gfx {
 
     /// Finish the frame; if the device was lost, the target is recreated next time.
     pub fn end(&mut self) {
-        if let Some((t, _)) = &self.target {
-            if unsafe { t.EndDraw(None, None) }.is_err() {
-                self.target = None;
-            }
+        if let Some((t, _)) = &self.target
+            && unsafe { t.EndDraw(None, None) }.is_err()
+        {
+            self.target = None;
         }
     }
 }
