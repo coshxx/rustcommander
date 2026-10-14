@@ -11,8 +11,8 @@ use windows::Win32::Storage::FileSystem::{
 };
 use windows::core::PCWSTR;
 
-use crate::files::names::to_wide_z;
-use super::{Cancelled, MAX_DEPTH, Worker, clear_readonly, err_text};
+use crate::files::names::to_utf16_nul;
+use super::{Cancelled, MAX_DEPTH, Worker, clear_readonly, error_text};
 
 struct CopyCtx<'a> {
     worker: &'a mut Worker,
@@ -46,7 +46,7 @@ impl Worker {
         let m = match std::fs::metadata(src) {
             Ok(m) => m,
             Err(e) => {
-                self.error(src, err_text(&e));
+                self.error(src, error_text(&e));
                 return Ok(());
             }
         };
@@ -56,13 +56,13 @@ impl Worker {
                 return Ok(());
             }
             if let Err(e) = std::fs::create_dir_all(dst) {
-                self.error(dst, err_text(&e));
+                self.error(dst, error_text(&e));
                 return Ok(());
             }
             let entries = match std::fs::read_dir(src) {
                 Ok(rd) => rd.flatten().collect::<Vec<_>>(),
                 Err(e) => {
-                    self.error(src, err_text(&e));
+                    self.error(src, error_text(&e));
                     return Ok(());
                 }
             };
@@ -91,7 +91,7 @@ impl Worker {
             clear_readonly(dst);
         }
         let base = self.progress.bytes_done;
-        let (s, d) = (to_wide_z(src.as_os_str()), to_wide_z(dst.as_os_str()));
+        let (s, d) = (to_utf16_nul(src.as_os_str()), to_utf16_nul(dst.as_os_str()));
         let mut ctx = CopyCtx { worker: self, base };
         let res = unsafe {
             CopyFileExW(

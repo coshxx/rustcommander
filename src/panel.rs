@@ -8,7 +8,7 @@ use std::sync::mpsc::Sender;
 use std::time::Instant;
 
 use crate::files::listing::{self, Entry, Kind, Listing, Loaded, Pending};
-use crate::files::names::{starts_with_ci, to_wide_z};
+use crate::files::names::{starts_with_ignore_case, to_utf16_nul};
 use crate::files::watch::Watcher;
 use crate::sys::win::SendHwnd;
 
@@ -93,7 +93,7 @@ impl Panel {
 
     pub fn go_up(&mut self, index: usize, sink: &LoadSink) {
         if let (Some(parent), Some(name)) = (self.dir.parent(), self.dir.file_name()) {
-            let sel = to_wide_z(name);
+            let sel = to_utf16_nul(name);
             let sel = sel[..sel.len() - 1].into();
             self.navigate(index, parent.to_path_buf(), Some(sel), sink);
         }
@@ -298,7 +298,7 @@ impl Panel {
         let hit = self
             .entries
             .iter()
-            .position(|e| e.kind != Kind::Parent && starts_with_ci(&e.name, &self.search));
+            .position(|e| e.kind != Kind::Parent && starts_with_ignore_case(&e.name, &self.search));
         if let Some(i) = hit {
             self.set_cursor(i);
         }

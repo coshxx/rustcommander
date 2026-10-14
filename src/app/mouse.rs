@@ -87,9 +87,9 @@ impl App {
         if self.drag.take().is_some() {
             self.invalidate();
         }
-        if self.drag_timer {
+        if self.drag_timer_armed {
             win::kill_timer(self.hwnd, TIMER_DRAG);
-            self.drag_timer = false;
+            self.drag_timer_armed = false;
         }
     }
 
@@ -130,9 +130,9 @@ impl App {
     }
 
     fn arm_drag_timer(&mut self, ms: u32) {
-        if !self.drag_timer {
+        if !self.drag_timer_armed {
             win::set_timer(self.hwnd, TIMER_DRAG, ms);
-            self.drag_timer = true;
+            self.drag_timer_armed = true;
         }
     }
 

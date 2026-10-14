@@ -9,8 +9,8 @@ use windows::Win32::UI::Shell::{
 };
 use windows::core::PCWSTR;
 
-use crate::files::names::to_wide_z;
-use super::{Cancelled, MAX_DEPTH, Worker, clear_readonly, err_text, is_reparse};
+use crate::files::names::to_utf16_nul;
+use super::{Cancelled, MAX_DEPTH, Worker, clear_readonly, error_text, is_reparse};
 
 fn count_no_follow(path: &Path, depth: usize, files: &mut u64) {
     let Ok(m) = std::fs::symlink_metadata(path) else { return };
@@ -52,7 +52,7 @@ impl Worker {
         let m = match std::fs::symlink_metadata(path) {
             Ok(m) => m,
             Err(e) => {
-                self.error(path, err_text(&e));
+                self.error(path, error_text(&e));
                 return Ok(());
             }
         };
@@ -64,7 +64,7 @@ impl Worker {
             let entries = match std::fs::read_dir(path) {
                 Ok(rd) => rd.flatten().collect::<Vec<_>>(),
                 Err(e) => {
-                    self.error(path, err_text(&e));
+                    self.error(path, error_text(&e));
                     return Ok(());
                 }
             };
@@ -75,7 +75,7 @@ impl Worker {
         clear_readonly(path);
         let res = if m.is_dir() { std::fs::remove_dir(path) } else { std::fs::remove_file(path) };
         if let Err(e) = res {
-            self.error(path, err_text(&e));
+            self.error(path, error_text(&e));
         }
         if !m.is_dir() {
             self.progress.files_done += 1;
@@ -90,7 +90,7 @@ impl Worker {
         // Double-null-terminated list of paths.
         let mut from: Vec<u16> = Vec::new();
         for s in sources {
-            from.extend(to_wide_z(s.as_os_str()));
+            from.extend(to_utf16_nul(s.as_os_str()));
         }
         from.push(0);
         let mut op = SHFILEOPSTRUCTW {

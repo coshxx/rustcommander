@@ -7,7 +7,7 @@
 //! - A mask without wildcards means "contains": `foto` = `*foto*`.
 //! - `*.*` also matches names without a dot.
 
-use crate::files::names::fold;
+use crate::files::names::fold_case;
 
 struct Pattern {
     chars: Vec<u32>,
@@ -52,7 +52,7 @@ fn pattern(s: &str) -> Pattern {
     } else {
         s.to_string()
     };
-    Pattern { chars: s.encode_utf16().map(fold).collect(), dirs }
+    Pattern { chars: s.encode_utf16().map(fold_case).collect(), dirs }
 }
 
 /// Glob match with `*` and `?`; `pat` and `name` are already case-folded.
@@ -91,7 +91,7 @@ impl Mask {
     }
 
     pub fn matches(&self, name: &[u16], is_dir: bool) -> bool {
-        let name: Vec<u32> = name.iter().map(|&c| fold(c)).collect();
+        let name: Vec<u32> = name.iter().map(|&c| fold_case(c)).collect();
         let hit = |ps: &[Pattern]| ps.iter().any(|p| p.dirs == is_dir && glob(&p.chars, &name));
         hit(&self.include) && !hit(&self.exclude)
     }

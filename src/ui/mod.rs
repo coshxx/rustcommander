@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use windows::Win32::UI::WindowsAndMessaging::WM_CLOSE;
 
-use crate::app::format::wide;
+use crate::app::format::utf16;
 use crate::app::layout::KEYBAR_H;
 use crate::app::{App, Mode};
 use crate::sys::gfx::rect;
@@ -32,7 +32,7 @@ impl App {
             self.hint_widths = Some(
                 HINTS
                     .iter()
-                    .map(|(k, l)| (self.gfx.measure(&wide(k), &f.small_center), self.gfx.measure(&wide(l), &f.small)))
+                    .map(|(k, l)| (self.gfx.measure(&utf16(k), &f.small_center), self.gfx.measure(&utf16(l), &f.small)))
                     .collect(),
             );
         }

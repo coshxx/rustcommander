@@ -3,7 +3,7 @@
 use std::cmp::Ordering;
 use std::os::windows::ffi::OsStrExt;
 
-pub fn to_wide_z(s: &std::ffi::OsStr) -> Vec<u16> {
+pub fn to_utf16_nul(s: &std::ffi::OsStr) -> Vec<u16> {
     s.encode_wide().chain(std::iter::once(0)).collect()
 }
 
@@ -14,7 +14,7 @@ fn is_digit(c: u16) -> bool {
 
 /// Lowercase folding; fast path for ASCII, the rest via `char::to_lowercase`.
 #[inline]
-pub fn fold(c: u16) -> u32 {
+pub fn fold_case(c: u16) -> u32 {
     if c < 128 {
         (c as u8).to_ascii_lowercase() as u32
     } else {
@@ -49,7 +49,7 @@ pub fn natural_cmp(a: &[u16], b: &[u16]) -> Ordering {
             }
             continue;
         }
-        let (ca, cb) = (fold(a[i]), fold(b[j]));
+        let (ca, cb) = (fold_case(a[i]), fold_case(b[j]));
         if ca != cb {
             return ca.cmp(&cb);
         }
@@ -59,8 +59,8 @@ pub fn natural_cmp(a: &[u16], b: &[u16]) -> Ordering {
     (a.len() - i).cmp(&(b.len() - j)).then_with(|| a.cmp(b))
 }
 
-pub fn starts_with_ci(name: &[u16], prefix: &[u16]) -> bool {
-    name.len() >= prefix.len() && name.iter().zip(prefix).all(|(&a, &b)| fold(a) == fold(b))
+pub fn starts_with_ignore_case(name: &[u16], prefix: &[u16]) -> bool {
+    name.len() >= prefix.len() && name.iter().zip(prefix).all(|(&a, &b)| fold_case(a) == fold_case(b))
 }
 
 #[cfg(test)]
@@ -80,7 +80,7 @@ mod tests {
 
     #[test]
     fn prefix_ci() {
-        assert!(starts_with_ci(&w("Programme"), &w("prog")));
-        assert!(!starts_with_ci(&w("Pr"), &w("prog")));
+        assert!(starts_with_ignore_case(&w("Programme"), &w("prog")));
+        assert!(!starts_with_ignore_case(&w("Pr"), &w("prog")));
     }
 }

@@ -4,7 +4,7 @@
 use std::time::Instant;
 
 use crate::app::{App, Mode, TIMER_JOB, Tone, WM_APP_JOB};
-use crate::files::names::to_wide_z;
+use crate::files::names::to_utf16_nul;
 use crate::ops::{self, Answer, Job};
 use crate::sys::win::{self, SendHwnd};
 
@@ -33,7 +33,7 @@ impl App {
         win::set_timer(self.hwnd, TIMER_JOB, JOB_CARD_DELAY_MS + 10);
     }
 
-    pub fn on_job(&mut self) {
+    pub fn on_job_event(&mut self) {
         loop {
             let Some(job) = &mut self.job else { break };
             let Ok(ev) = job.handle.events.try_recv() else { break };
@@ -75,10 +75,10 @@ impl App {
                 .as_ref()
                 .and_then(|p| p.strip_prefix(&dir).ok())
                 .and_then(|rel| rel.components().next())
-                .map(|c| to_wide_z(c.as_os_str()))
+                .map(|c| to_utf16_nul(c.as_os_str()))
                 .map(|w| w[..w.len() - 1].into());
             match select {
-                Some(name) => self.nav(i, dir, Some(name)),
+                Some(name) => self.navigate(i, dir, Some(name)),
                 None => self.panels[i].reload(i, &self.sink),
             }
         }

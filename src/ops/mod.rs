@@ -134,7 +134,7 @@ fn same_volume(a: &Path, b: &Path) -> bool {
     root(a).is_some() && root(a) == root(b)
 }
 
-fn err_text(e: &std::io::Error) -> String {
+fn error_text(e: &std::io::Error) -> String {
     match e.raw_os_error() {
         Some(code) => windows::core::Error::from_hresult(windows::core::HRESULT::from_win32(code as u32))
             .message()
@@ -244,7 +244,7 @@ impl Worker {
                             self.summary.done = 1;
                             self.summary.select = Some(target);
                         }
-                        Err(e) => self.error(&from, err_text(&e)),
+                        Err(e) => self.error(&from, error_text(&e)),
                     }
                 }
                 Ok(())
@@ -255,7 +255,7 @@ impl Worker {
                         self.summary.done = 1;
                         self.summary.select = Some(path);
                     }
-                    Err(e) => self.error(&path, err_text(&e)),
+                    Err(e) => self.error(&path, error_text(&e)),
                 }
                 Ok(())
             }
@@ -283,7 +283,7 @@ impl Worker {
         let many = sources.len() > 1 || ends_with_sep;
         if many && !dest.exists() {
             if let Err(e) = std::fs::create_dir_all(dest) {
-                self.error(dest, err_text(&e));
+                self.error(dest, error_text(&e));
                 return Ok(());
             }
         }

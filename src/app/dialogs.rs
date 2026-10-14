@@ -3,12 +3,12 @@
 
 use std::path::PathBuf;
 
-use crate::app::format::{describe, parse_path, valid_name, wide};
+use crate::app::format::{describe, parse_path, utf16, valid_name};
 use crate::app::text_input::TextInput;
 use crate::app::{App, Mode, Tone};
 use crate::files::listing::Kind;
 use crate::files::mask::Mask;
-use crate::files::names::fold;
+use crate::files::names::fold_case;
 use crate::ops::Job;
 use crate::sys::win::{self, Drive};
 
@@ -68,7 +68,7 @@ impl App {
         self.active = panel;
         let drives = win::drives();
         let cur = self.panels[panel].dir.as_os_str().encode_wide_first();
-        let sel = drives.iter().position(|d| Some(fold(d.root[0])) == cur.map(fold)).unwrap_or(0);
+        let sel = drives.iter().position(|d| Some(fold_case(d.root[0])) == cur.map(fold_case)).unwrap_or(0);
         self.mode = Mode::Drives(DrivePopup { panel, drives, sel });
     }
 
@@ -78,7 +78,7 @@ impl App {
                 let root = String::from_utf16_lossy(&drive.root[..3]);
                 // Same drive: stay in the current directory.
                 if !self.panels[d.panel].dir.starts_with(&root) {
-                    self.nav(d.panel, PathBuf::from(root), None);
+                    self.navigate(d.panel, PathBuf::from(root), None);
                 }
             }
         }
@@ -86,14 +86,14 @@ impl App {
 
     pub(crate) fn start_path_edit(&mut self, panel: usize) {
         self.active = panel;
-        let text = wide(&self.panels[panel].dir.display().to_string());
+        let text = utf16(&self.panels[panel].dir.display().to_string());
         self.mode = Mode::PathEdit { panel, input: TextInput::new(text) };
     }
 
     pub(crate) fn commit_path_edit(&mut self) {
         if let Mode::PathEdit { panel, input } = std::mem::replace(&mut self.mode, Mode::Normal) {
             if let Some(p) = parse_path(&input.text, &self.panels[panel].dir) {
-                self.nav(panel, p, None);
+                self.navigate(panel, p, None);
             }
         }
     }
@@ -114,7 +114,7 @@ impl App {
                 }
                 let verb = if kind == DialogKind::Copy { "kopieren" } else { "verschieben" };
                 let msg = format!("{} {verb} nach:", describe(&sources));
-                (sources, msg, Some(TextInput::new(wide(&dest))))
+                (sources, msg, Some(TextInput::new(utf16(&dest))))
             }
             DialogKind::Delete { recycle } => {
                 let sources = p.targets();
@@ -142,7 +142,7 @@ impl App {
             }
             DialogKind::Select { .. } => {
                 let msg = "Maske, z. B. *.bmp;*.png · Ordner: \\ am Ende · | schließt aus".to_string();
-                (Vec::new(), msg, Some(TextInput::selected(wide(&self.mask))))
+                (Vec::new(), msg, Some(TextInput::selected(utf16(&self.mask))))
             }
         };
         if sources.is_empty() && !matches!(kind, DialogKind::MkDir | DialogKind::Select { .. }) {
@@ -163,7 +163,7 @@ impl App {
         let job = match d.kind {
             DialogKind::Select { .. } => return,
             DialogKind::Copy | DialogKind::Move => {
-                let Some(dest) = parse_path(&wide(&input), &dir) else { return };
+                let Some(dest) = parse_path(&utf16(&input), &dir) else { return };
                 if d.kind == DialogKind::Copy {
                     Job::Copy { sources: d.sources, dest }
                 } else {

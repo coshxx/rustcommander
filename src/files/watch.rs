@@ -13,7 +13,7 @@ use windows::Win32::Storage::FileSystem::{
 use windows::Win32::System::Threading::{CreateEventW, INFINITE, SetEvent, WaitForMultipleObjects};
 use windows::core::PCWSTR;
 
-use crate::files::names::to_wide_z;
+use crate::files::names::to_utf16_nul;
 use crate::sys::win::SendHwnd;
 
 /// Event handle shared between the UI and the watcher thread; closed when both are done.
@@ -51,7 +51,7 @@ impl Watcher {
     pub fn new(dir: &Path, notify: SendHwnd, msg: u32, wparam: usize) -> Option<Watcher> {
         let stop = Arc::new(Event(unsafe { CreateEventW(None, true, false, None) }.ok()?));
         let thread_stop = stop.clone();
-        let path = to_wide_z(dir.as_os_str());
+        let path = to_utf16_nul(dir.as_os_str());
         std::thread::spawn(move || {
             let filter = FILE_NOTIFY_CHANGE_FILE_NAME
                 | FILE_NOTIFY_CHANGE_DIR_NAME

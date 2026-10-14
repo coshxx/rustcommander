@@ -7,8 +7,8 @@ use windows::Win32::Foundation::ERROR_NOT_SAME_DEVICE;
 use windows::Win32::Storage::FileSystem::{MOVE_FILE_FLAGS, MOVEFILE_REPLACE_EXISTING, MoveFileExW};
 use windows::core::PCWSTR;
 
-use crate::files::names::to_wide_z;
-use super::{Cancelled, MAX_DEPTH, Worker, clear_readonly, err_text, is_reparse, scan};
+use crate::files::names::to_utf16_nul;
+use super::{Cancelled, MAX_DEPTH, Worker, clear_readonly, error_text, is_reparse, scan};
 
 impl Worker {
     pub(super) fn move_item(&mut self, src: &Path, dst: &Path, fast: bool) -> Result<(), Cancelled> {
@@ -21,7 +21,7 @@ impl Worker {
                 let entries = match std::fs::read_dir(src) {
                     Ok(rd) => rd.flatten().collect::<Vec<_>>(),
                     Err(e) => {
-                        self.error(src, err_text(&e));
+                        self.error(src, error_text(&e));
                         return Ok(());
                     }
                 };
@@ -53,7 +53,7 @@ impl Worker {
     }
 
     fn rename_or_cross(&mut self, src: &Path, dst: &Path, flags: MOVE_FILE_FLAGS, fast: bool) -> Result<(), Cancelled> {
-        let (s, d) = (to_wide_z(src.as_os_str()), to_wide_z(dst.as_os_str()));
+        let (s, d) = (to_utf16_nul(src.as_os_str()), to_utf16_nul(dst.as_os_str()));
         match unsafe { MoveFileExW(PCWSTR(s.as_ptr()), PCWSTR(d.as_ptr()), flags) } {
             Ok(()) => {
                 if fast {
@@ -81,7 +81,7 @@ impl Worker {
         let m = match std::fs::symlink_metadata(src) {
             Ok(m) => m,
             Err(e) => {
-                self.error(src, err_text(&e));
+                self.error(src, error_text(&e));
                 return Ok(());
             }
         };
@@ -95,13 +95,13 @@ impl Worker {
                 return Ok(());
             }
             if let Err(e) = std::fs::create_dir_all(dst) {
-                self.error(dst, err_text(&e));
+                self.error(dst, error_text(&e));
                 return Ok(());
             }
             let entries = match std::fs::read_dir(src) {
                 Ok(rd) => rd.flatten().collect::<Vec<_>>(),
                 Err(e) => {
-                    self.error(src, err_text(&e));
+                    self.error(src, error_text(&e));
                     return Ok(());
                 }
             };
@@ -116,7 +116,7 @@ impl Worker {
         if copied && std::fs::metadata(dst).map(|d| d.len() == m.len()).unwrap_or(false) {
             clear_readonly(src);
             if let Err(e) = std::fs::remove_file(src) {
-                self.error(src, err_text(&e));
+                self.error(src, error_text(&e));
             }
         }
         Ok(())

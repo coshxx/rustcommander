@@ -14,7 +14,7 @@ use windows::Win32::Storage::FileSystem::{
 };
 use windows::core::PCWSTR;
 
-use crate::files::names::{natural_cmp, to_wide_z};
+use crate::files::names::{natural_cmp, to_utf16_nul};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kind {
@@ -90,7 +90,7 @@ fn long_path(path: &Path) -> Vec<u16> {
     out
 }
 
-fn ext_kind(name: &[u16]) -> Kind {
+fn kind_from_extension(name: &[u16]) -> Kind {
     let Some(dot) = name.iter().rposition(|&c| c == b'.' as u16) else {
         return Kind::File;
     };
@@ -126,7 +126,7 @@ fn ext_kind(name: &[u16]) -> Kind {
 /// If `path` is a file, its directory is loaded instead and the file gets selected.
 pub fn load(path: &Path, cancel: &AtomicBool) -> Result<Listing, String> {
     let start = Instant::now();
-    let wpath = to_wide_z(path.as_os_str());
+    let wpath = to_utf16_nul(path.as_os_str());
     let attrs = unsafe { GetFileAttributesW(PCWSTR(wpath.as_ptr())) };
     if attrs == INVALID_FILE_ATTRIBUTES {
         return Err(windows::core::Error::from_thread().message());
@@ -183,7 +183,7 @@ pub fn load(path: &Path, cancel: &AtomicBool) -> Result<Listing, String> {
             }
             entries.push(Entry {
                 name: name.into(),
-                kind: if is_dir { Kind::Dir } else { ext_kind(name) },
+                kind: if is_dir { Kind::Dir } else { kind_from_extension(name) },
                 hidden: a & (FILE_ATTRIBUTE_HIDDEN.0 | FILE_ATTRIBUTE_SYSTEM.0) != 0,
                 size: if is_dir { 0 } else { size },
                 mtime: ((data.ftLastWriteTime.dwHighDateTime as u64) << 32)
@@ -237,8 +237,8 @@ mod tests {
 
     #[test]
     fn kinds() {
-        assert_eq!(ext_kind(&w("a.RS")), Kind::Code);
-        assert_eq!(ext_kind(&w("noext")), Kind::File);
-        assert_eq!(ext_kind(&w("x.tar.gz")), Kind::Archive);
+        assert_eq!(kind_from_extension(&w("a.RS")), Kind::Code);
+        assert_eq!(kind_from_extension(&w("noext")), Kind::File);
+        assert_eq!(kind_from_extension(&w("x.tar.gz")), Kind::Archive);
     }
 }

@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use crate::app::dialogs::{Dialog, DialogKind, DrivePopup};
-use crate::app::format::fmt_size;
+use crate::app::format::format_size;
 use crate::app::jobs::JOB_CARD_DELAY_MS;
 use crate::app::layout::{CARD_W, ICON_W, KEYBAR_H, ROW_H, STATUS_H};
 use crate::app::{App, Tone};
@@ -99,7 +99,7 @@ impl App {
             }
             let mut stats = format!("{} / {} Dateien", p.files_done, p.files_total);
             if p.bytes_total > 0 {
-                stats += &format!("  ·  {} / {}", fmt_size(p.bytes_done), fmt_size(p.bytes_total));
+                stats += &format!("  ·  {} / {}", format_size(p.bytes_done), format_size(p.bytes_total));
             }
             c.text_str(&stats, &c.fonts.small, rect(ix, r.top + 64.0, iw, 22.0), t.text_dim);
             c.text_str("Esc bricht ab", &c.fonts.small_right, rect(ix, r.top + 64.0, iw, 22.0), t.text_hidden);

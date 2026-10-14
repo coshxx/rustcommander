@@ -73,20 +73,21 @@ pub struct App {
     pub(crate) active: usize,
     pub(crate) mode: Mode,
     pub(crate) sink: LoadSink,
-    rx: Receiver<Loaded>,
+    /// Results from the directory loader threads (see `LoadSink`).
+    loaded_rx: Receiver<Loaded>,
     pub(crate) theme: &'static Theme,
     pub(crate) hint_widths: Option<Vec<(f32, f32)>>,
     pub(crate) job: Option<RunningJob>,
     pub(crate) notice: Option<Notice>,
     refresh_armed: [bool; 2],
     pub(crate) drag: Option<Drag>,
-    pub(crate) drag_timer: bool,
+    pub(crate) drag_timer_armed: bool,
     /// Panel whose scrollbar is under the mouse.
     pub(crate) hover_bar: Option<usize>,
     /// Last mask used for Num+ / Num−.
     pub(crate) mask: String,
     /// The key that just opened a dialog also produces a WM_CHAR (e.g. Num+ → '+'): drop it.
-    pub(crate) eat_char: bool,
+    pub(crate) swallow_next_char: bool,
     pub(crate) painted: bool,
     pub(crate) painted_content: bool,
 }
@@ -114,21 +115,21 @@ impl App {
             active: cfg.active.min(1),
             mode: Mode::Normal,
             sink,
-            rx,
+            loaded_rx: rx,
             theme: &DARK,
             hint_widths: None,
             job: None,
             notice: None,
             refresh_armed: [false; 2],
             drag: None,
-            drag_timer: false,
+            drag_timer_armed: false,
             hover_bar: None,
             mask: cfg.mask.clone().unwrap_or_else(|| "*.*".into()),
-            eat_char: false,
+            swallow_next_char: false,
             painted: false,
             painted_content: false,
         };
-        app.arm_timer();
+        app.arm_loading_indicator();
         app
     }
 
@@ -143,7 +144,7 @@ impl App {
         cfg
     }
 
-    pub(crate) fn nav(&mut self, i: usize, path: PathBuf, select: Option<Box<[u16]>>) {
+    pub(crate) fn navigate(&mut self, i: usize, path: PathBuf, select: Option<Box<[u16]>>) {
         self.panels[i].navigate(i, path, select, &self.sink);
         win::set_timer(self.hwnd, TIMER_LOADING, LOADING_DELAY_MS + 10);
     }
@@ -159,7 +160,7 @@ impl App {
     }
 
     pub fn on_loaded(&mut self) {
-        while let Ok(l) = self.rx.try_recv() {
+        while let Ok(l) = self.loaded_rx.try_recv() {
             let info = match &l.result {
                 Ok(li) => format!(
                     "  dir {} – {} entries in {:.2} ms",
@@ -183,12 +184,12 @@ impl App {
                     if dir.as_os_str().is_empty() {
                         // Start path broken (e.g. drive gone)? Fall back to C:\.
                         if path != Path::new(r"C:\") {
-                            self.nav(p, PathBuf::from(r"C:\"), None);
+                            self.navigate(p, PathBuf::from(r"C:\"), None);
                         }
                     } else if path == dir {
                         // The shown directory can't be read anymore (deleted?): go up.
                         if let Some(parent) = dir.parent() {
-                            self.nav(p, parent.to_path_buf(), None);
+                            self.navigate(p, parent.to_path_buf(), None);
                         }
                     }
                 }
@@ -210,7 +211,7 @@ impl App {
         match id {
             TIMER_NOTICE => self.notice = None,
             TIMER_DRAG => {
-                self.drag_timer = false;
+                self.drag_timer_armed = false;
                 self.drag_tick();
             }
             _ if TIMER_REFRESH.contains(&id) => {
@@ -233,7 +234,7 @@ impl App {
             Kind::Parent => self.panels[a].go_up(a, &self.sink),
             Kind::Dir => {
                 let path = p.dir.join(e.os_name());
-                self.nav(a, path, None);
+                self.navigate(a, path, None);
             }
             _ => {
                 if let Some(path) = p.current_path() {
@@ -241,10 +242,10 @@ impl App {
                 }
             }
         }
-        self.arm_timer();
+        self.arm_loading_indicator();
     }
 
-    pub(crate) fn arm_timer(&self) {
+    pub(crate) fn arm_loading_indicator(&self) {
         if self.panels.iter().any(|p| p.pending.is_some()) {
             win::set_timer(self.hwnd, TIMER_LOADING, LOADING_DELAY_MS + 10);
         }

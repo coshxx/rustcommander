@@ -1,6 +1,6 @@
 //! Drawing one panel: path bar, column headers, file rows, scrollbar, status bar.
 
-use crate::app::format::{fmt_date, fmt_size};
+use crate::app::format::{format_date, format_size};
 use crate::app::layout::{
     CHIP_W, COLS_H, DATE_W, ICON_W, KEYBAR_H, PAD, PATH_H, ROW_H, SIZE_W, STATUS_H,
 };
@@ -102,10 +102,10 @@ impl App {
             match e.kind {
                 Kind::Parent => {}
                 Kind::Dir => c.text_str("Ordner", &f.small_right, rect(size_x, y, SIZE_W, ROW_H), dim),
-                _ => c.text_str(&fmt_size(e.size), &f.right, rect(size_x, y, SIZE_W, ROW_H), if e.hidden && !e.marked { tcol } else { dim }),
+                _ => c.text_str(&format_size(e.size), &f.right, rect(size_x, y, SIZE_W, ROW_H), if e.hidden && !e.marked { tcol } else { dim }),
             }
             if e.kind != Kind::Parent {
-                c.text_str(&fmt_date(e.mtime), &f.small, rect(date_x, y, DATE_W, ROW_H), dim);
+                c.text_str(&format_date(e.mtime), &f.small, rect(date_x, y, DATE_W, ROW_H), dim);
             }
         }
         c.unclip();
@@ -147,11 +147,11 @@ impl App {
         match &p.error {
             Some(err) => c.text_str(err, &f.small, sr, t.error),
             None if marked > 0 => {
-                let s = format!("{marked} markiert  ·  {}", fmt_size(marked_bytes));
+                let s = format!("{marked} markiert  ·  {}", format_size(marked_bytes));
                 c.text_str(&s, &f.small, sr, t.marked);
             }
             None => {
-                let s = format!("{} Ordner  ·  {} Dateien  ·  {}", p.dirs, p.files, fmt_size(p.bytes));
+                let s = format!("{} Ordner  ·  {} Dateien  ·  {}", p.dirs, p.files, format_size(p.bytes));
                 c.text_str(&s, &f.small, sr, t.text_dim);
             }
         }

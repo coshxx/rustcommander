@@ -4,14 +4,14 @@ use windows::Win32::UI::Input::KeyboardAndMouse::*;
 
 use crate::app::dialogs::DialogKind;
 use crate::app::{App, Mode};
-use crate::files::names::fold;
+use crate::files::names::fold_case;
 use crate::ops::Answer;
 use crate::sys::win;
 
 impl App {
     /// `true` = handled.
     pub fn on_key(&mut self, vk: VIRTUAL_KEY) -> bool {
-        self.eat_char = false;
+        self.swallow_next_char = false;
         let ctrl = win::key_down(VK_CONTROL);
         let shift = win::key_down(VK_SHIFT);
         let hwnd = self.hwnd;
@@ -134,11 +134,11 @@ impl App {
             }
             VK_SUBTRACT if ctrl => p.clear_marks(),
             VK_ADD | VK_SUBTRACT => {
-                self.eat_char = true;
+                self.swallow_next_char = true;
                 self.open_dialog(DialogKind::Select { add: vk == VK_ADD });
             }
             VK_MULTIPLY => {
-                self.eat_char = true;
+                self.swallow_next_char = true;
                 p.invert_file_marks();
             }
             VK_BACK if !p.search.is_empty() => p.search_pop(),
@@ -160,7 +160,7 @@ impl App {
             VK_F8 | VK_DELETE => self.open_dialog(DialogKind::Delete { recycle: !shift }),
             _ => return false,
         }
-        self.arm_timer();
+        self.arm_loading_indicator();
         true
     }
 
@@ -179,7 +179,7 @@ impl App {
     }
 
     pub fn on_char(&mut self, c: u16) {
-        if std::mem::take(&mut self.eat_char) {
+        if std::mem::take(&mut self.swallow_next_char) {
             return;
         }
         if c < 0x20 || c == 0x7f {
@@ -187,7 +187,7 @@ impl App {
         }
         match &mut self.mode {
             Mode::Drives(d) => {
-                let hit = d.drives.iter().position(|dr| fold(dr.root[0]) == fold(c));
+                let hit = d.drives.iter().position(|dr| fold_case(dr.root[0]) == fold_case(c));
                 if let Some(i) = hit {
                     self.choose_drive(i);
                 }
@@ -198,7 +198,7 @@ impl App {
                     i.insert(c);
                 }
             }
-            Mode::Conflict(_) => match char::from_u32(fold(c)) {
+            Mode::Conflict(_) => match char::from_u32(fold_case(c)) {
                 Some('s') => self.answer_conflict(Answer::Skip),
                 Some('a') => self.answer_conflict(Answer::OverwriteAll),
                 Some('k') => self.answer_conflict(Answer::SkipAll),
@@ -209,7 +209,7 @@ impl App {
                 let p = &mut self.panels[a];
                 if c == b'\\' as u16 {
                     p.go_root(a, &self.sink);
-                    self.arm_timer();
+                    self.arm_loading_indicator();
                 } else if c == b' ' as u16 && p.search.is_empty() {
                     p.toggle_mark();
                     p.move_cursor(1);

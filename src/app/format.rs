@@ -4,11 +4,11 @@ use std::path::{Path, PathBuf};
 
 use crate::sys::win;
 
-pub(crate) fn wide(s: &str) -> Vec<u16> {
+pub(crate) fn utf16(s: &str) -> Vec<u16> {
     s.encode_utf16().collect()
 }
 
-pub(crate) fn fmt_size(b: u64) -> String {
+pub(crate) fn format_size(b: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
     if b < 1024 {
         return format!("{b} B");
@@ -23,7 +23,7 @@ pub(crate) fn fmt_size(b: u64) -> String {
     format!("{} {}", s.replace('.', ","), UNITS[u])
 }
 
-pub(crate) fn fmt_date(t: u64) -> String {
+pub(crate) fn format_date(t: u64) -> String {
     if t == 0 {
         return String::new();
     }

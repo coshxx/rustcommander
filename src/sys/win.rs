@@ -19,7 +19,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{PCWSTR, w};
 
-use crate::files::names::to_wide_z;
+use crate::files::names::to_utf16_nul;
 
 pub fn invalidate(hwnd: HWND) {
     unsafe {
@@ -150,8 +150,8 @@ pub fn expand_env(input: &[u16]) -> Vec<u16> {
 /// ShellExecute blocks noticeably with some handlers.
 pub fn shell_open(path: PathBuf) {
     std::thread::spawn(move || {
-        let file = to_wide_z(path.as_os_str());
-        let dir = path.parent().map(|d: &Path| to_wide_z(d.as_os_str()));
+        let file = to_utf16_nul(path.as_os_str());
+        let dir = path.parent().map(|d: &Path| to_utf16_nul(d.as_os_str()));
         unsafe {
             let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
             ShellExecuteW(

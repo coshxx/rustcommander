@@ -260,7 +260,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
             LRESULT(0)
         }
         app::WM_APP_JOB => {
-            cell.with(|app| app.on_job());
+            cell.with(|app| app.on_job_event());
             LRESULT(0)
         }
         app::WM_APP_DIRCHANGED => {

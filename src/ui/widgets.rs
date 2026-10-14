@@ -1,7 +1,7 @@
 //! Reusable drawing pieces: card, key chips, text input box and the key bar.
 
 use crate::app::App;
-use crate::app::format::wide;
+use crate::app::format::utf16;
 use crate::app::layout::{KEYBAR_H, PAD};
 use crate::app::text_input::TextInput;
 use crate::sys::gfx::{Canvas, Rect, rect};
@@ -43,8 +43,8 @@ impl App {
     pub(crate) fn draw_chips(&self, c: &Canvas, mut x: f32, y: f32, h: f32, chips: &[(&str, &str)]) -> f32 {
         let t = self.theme;
         for (key, label) in chips {
-            let kw = self.gfx.measure(&wide(key), &c.fonts.small_center) + 12.0;
-            let lw = self.gfx.measure(&wide(label), &c.fonts.small) + 2.0;
+            let kw = self.gfx.measure(&utf16(key), &c.fonts.small_center) + 12.0;
+            let lw = self.gfx.measure(&utf16(label), &c.fonts.small) + 2.0;
             let chip = rect(x, y + (h - 18.0) / 2.0, kw, 18.0);
             c.fill_round(chip, 4.0, t.popup_bg);
             c.text_str(key, &c.fonts.small_center, chip, t.accent);
