@@ -140,7 +140,13 @@ impl Panel {
                 if !same_dir {
                     self.top = 0;
                 }
-                self.set_cursor(idx);
+                if keep {
+                    // Auto/manual refresh: the view stays where the user scrolled it.
+                    self.cursor = idx.min(self.entries.len().saturating_sub(1));
+                    self.clamp_top();
+                } else {
+                    self.set_cursor(idx);
+                }
                 Applied::Ok { dir_changed: !same_dir }
             }
             Err(e) => {
@@ -165,6 +171,15 @@ impl Panel {
         let all = self.entries.iter().filter(|e| e.kind != Kind::Parent).all(|e| e.marked);
         for e in self.entries.iter_mut().filter(|e| e.kind != Kind::Parent) {
             e.marked = !all;
+        }
+    }
+
+    /// Set the mark of one entry (`..` is never marked).
+    pub fn set_mark(&mut self, i: usize, marked: bool) {
+        if let Some(e) = self.entries.get_mut(i) {
+            if e.kind != Kind::Parent {
+                e.marked = marked;
+            }
         }
     }
 
@@ -229,9 +244,18 @@ impl Panel {
         self.clamp_top();
     }
 
-    fn clamp_top(&mut self) {
-        let max_top = self.entries.len().saturating_sub(self.rows_visible.max(1));
-        self.top = self.top.min(max_top);
+    /// Scroll to an absolute position without touching the cursor.
+    pub fn scroll_to(&mut self, top: usize) {
+        self.top = top;
+        self.clamp_top();
+    }
+
+    pub fn max_top(&self) -> usize {
+        self.entries.len().saturating_sub(self.rows_visible.max(1))
+    }
+
+    pub fn clamp_top(&mut self) {
+        self.top = self.top.min(self.max_top());
     }
 
     /// Quick search: append a character and jump to the first matching entry.

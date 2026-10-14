@@ -26,6 +26,9 @@ const TIMER_LOADING: usize = 1;
 const TIMER_REFRESH: [usize; 2] = [2, 3];
 const TIMER_NOTICE: usize = 4;
 const TIMER_JOB: usize = 5;
+/// Auto-repeat while a mouse button is held (track paging, drag-marking at the edges).
+const TIMER_DRAG: usize = 6;
+const DRAG_REPEAT_MS: u32 = 50;
 /// Directory change notifications trigger at most one reload per this interval.
 const REFRESH_THROTTLE_MS: u32 = 250;
 /// Short jobs (rename, mkdir) finish before their progress card would appear.
@@ -44,6 +47,9 @@ const ICON_W: f32 = 24.0;
 const CHIP_W: f32 = 40.0;
 const POPUP_W: f32 = 230.0;
 const CARD_W: f32 = 400.0;
+/// Width of the scrollbar's mouse zone at the panel's right edge.
+const SCROLL_ZONE_W: f32 = 14.0;
+const THUMB_MIN_H: f32 = 24.0;
 
 const HINTS: [(&str, &str); 9] = [
     ("Tab", "Seite"),
@@ -163,9 +169,27 @@ enum Hit {
     Drive(usize),
     Path(usize),
     Row(usize, usize),
+    Scrollbar(usize),
     Panel(usize),
     Popup(usize),
     Nothing,
+}
+
+/// Mouse interaction while a button is held (the window has the mouse capture).
+#[derive(Clone, Copy)]
+enum Drag {
+    /// Dragging the scrollbar thumb; `grab` = mouse offset from the thumb's top.
+    Thumb { panel: usize, grab: f32 },
+    /// Left button held on the track: page towards the mouse, auto-repeating.
+    Page { panel: usize, y: f32 },
+    /// Right button held: every row the mouse passes gets `marked`.
+    Mark { panel: usize, marked: bool, last: usize, y: f32 },
+}
+
+struct ScrollBar {
+    zone: Rect,
+    thumb_y: f32,
+    thumb_h: f32,
 }
 
 struct RunningJob {
@@ -202,6 +226,10 @@ pub struct App {
     job: Option<RunningJob>,
     notice: Option<Notice>,
     refresh_armed: [bool; 2],
+    drag: Option<Drag>,
+    drag_timer: bool,
+    /// Panel whose scrollbar is under the mouse.
+    hover_bar: Option<usize>,
     painted: bool,
     painted_content: bool,
 }
@@ -318,6 +346,9 @@ impl App {
             job: None,
             notice: None,
             refresh_armed: [false; 2],
+            drag: None,
+            drag_timer: false,
+            hover_bar: None,
             painted: false,
             painted_content: false,
         };
@@ -402,6 +433,10 @@ impl App {
         win::kill_timer(self.hwnd, id);
         match id {
             TIMER_NOTICE => self.notice = None,
+            TIMER_DRAG => {
+                self.drag_timer = false;
+                self.drag_tick();
+            }
             _ if TIMER_REFRESH.contains(&id) => {
                 let i = if id == TIMER_REFRESH[0] { 0 } else { 1 };
                 self.refresh_armed[i] = false;
@@ -504,7 +539,8 @@ impl App {
         let rows = (Self::list_area(h).1 / ROW_H).floor().max(1.0) as usize;
         for p in &mut self.panels {
             p.rows_visible = rows;
-            p.ensure_visible();
+            // Only clamp: the user may have scrolled the cursor out of view on purpose.
+            p.clamp_top();
         }
     }
 
@@ -527,12 +563,28 @@ impl App {
         }
         let (top, lh) = Self::list_area(h);
         if y >= top && y < top + lh {
+            if self.scrollbar(p, w, h).is_some_and(|sb| x >= sb.zone.left) {
+                return Hit::Scrollbar(p);
+            }
             let row = self.panels[p].top + ((y - top) / ROW_H) as usize;
             if row < self.panels[p].entries.len() {
                 return Hit::Row(p, row);
             }
         }
         Hit::Panel(p)
+    }
+
+    /// Scrollbar geometry; `None` if everything fits.
+    fn scrollbar(&self, i: usize, w: f32, h: f32) -> Option<ScrollBar> {
+        let p = &self.panels[i];
+        let (top, lh) = Self::list_area(h);
+        if p.entries.len() <= p.rows_visible || lh <= 0.0 {
+            return None;
+        }
+        let (x, pw) = self.panel_x(i, w);
+        let thumb_h = (lh * p.rows_visible as f32 / p.entries.len() as f32).max(THUMB_MIN_H).min(lh);
+        let thumb_y = top + (lh - thumb_h) * p.top as f32 / p.max_top() as f32;
+        Some(ScrollBar { zone: rect(x + pw - SCROLL_ZONE_W, top, SCROLL_ZONE_W, lh), thumb_y, thumb_h })
     }
 
     fn popup_rect(&self, px: f32, n: usize) -> Rect {
@@ -751,6 +803,14 @@ impl App {
     fn on_key_normal(&mut self, vk: VIRTUAL_KEY, ctrl: bool, shift: bool) -> bool {
         let a = self.active;
         let p = &mut self.panels[a];
+        // Scrolled away with the mouse? Any key brings the cursor back into view.
+        if !matches!(vk, VK_SHIFT | VK_CONTROL | VK_MENU | VK_LWIN | VK_RWIN) {
+            let top = p.top;
+            p.ensure_visible();
+            if p.top != top {
+                win::invalidate(self.hwnd);
+            }
+        }
         match vk {
             VK_TAB => {
                 p.search.clear();
@@ -875,28 +935,39 @@ impl App {
         self.invalidate();
     }
 
-    pub fn on_click(&mut self, x: f32, y: f32, double: bool) {
-        if matches!(self.mode, Mode::Dialog(_) | Mode::Conflict(_)) {
-            return;
+    /// Mouse button pressed. Returns `true` if a drag started and the mouse should be captured.
+    pub fn on_button_down(&mut self, x: f32, y: f32, right: bool, double: bool) -> bool {
+        if self.drag.is_some() || matches!(self.mode, Mode::Dialog(_) | Mode::Conflict(_)) {
+            return false;
         }
         let hit = self.hit(x, y);
         if let Mode::Drives(_) = self.mode {
             match hit {
-                Hit::Popup(i) => self.choose_drive(i),
+                Hit::Popup(i) if !right => self.choose_drive(i),
                 _ => self.mode = Mode::Normal,
             }
             self.invalidate();
-            return;
+            return false;
         }
         if let Mode::PathEdit { panel, .. } = &self.mode {
-            if matches!(hit, Hit::Path(p) if p == *panel) {
-                return;
+            if !right && matches!(hit, Hit::Path(p) if p == *panel) {
+                return false;
             }
             self.mode = Mode::Normal;
         }
+        let mut capture = false;
         match hit {
-            Hit::Drive(p) => self.open_drives(p),
-            Hit::Path(p) => self.start_path_edit(p),
+            Hit::Row(p, row) if right => {
+                // Toggle the row; dragging gives every passed row the same state.
+                self.active = p;
+                let panel = &mut self.panels[p];
+                panel.search.clear();
+                panel.set_cursor(row);
+                let marked = !panel.entries[row].marked;
+                panel.set_mark(row, marked);
+                self.drag = Some(Drag::Mark { panel: p, marked, last: row, y });
+                capture = true;
+            }
             Hit::Row(p, row) => {
                 self.active = p;
                 self.panels[p].search.clear();
@@ -905,9 +976,169 @@ impl App {
                     self.open_current();
                 }
             }
-            Hit::Panel(p) => self.active = p,
+            Hit::Scrollbar(p) if !right => capture = self.press_scrollbar(p, y),
+            Hit::Drive(p) if !right => self.open_drives(p),
+            Hit::Path(p) if !right => self.start_path_edit(p),
+            Hit::Drive(p) | Hit::Path(p) | Hit::Scrollbar(p) | Hit::Panel(p) => self.active = p,
             Hit::Popup(_) | Hit::Nothing => {}
         }
+        self.invalidate();
+        capture
+    }
+
+    /// Mouse button released. Returns `true` if a drag ended (release the capture).
+    pub fn on_button_up(&mut self, x: f32, y: f32, right: bool) -> bool {
+        match self.drag {
+            Some(Drag::Mark { .. }) if !right => return false,
+            Some(Drag::Thumb { .. } | Drag::Page { .. }) if right => return false,
+            None => return false,
+            _ => {}
+        }
+        self.cancel_drag();
+        self.on_mouse_move(x, y);
+        true
+    }
+
+    /// Ends a drag, e.g. when another window takes the mouse capture.
+    pub fn cancel_drag(&mut self) {
+        if self.drag.take().is_some() {
+            self.invalidate();
+        }
+        if self.drag_timer {
+            win::kill_timer(self.hwnd, TIMER_DRAG);
+            self.drag_timer = false;
+        }
+    }
+
+    pub fn on_mouse_move(&mut self, x: f32, y: f32) {
+        match &mut self.drag {
+            Some(Drag::Thumb { panel, grab }) => {
+                let (p, ty) = (*panel, y - *grab);
+                self.drag_thumb(p, ty);
+            }
+            Some(Drag::Page { y: py, .. }) => *py = y,
+            Some(Drag::Mark { y: my, .. }) => {
+                *my = y;
+                self.extend_mark();
+                // Outside the list: the timer keeps scrolling and marking.
+                let (_, h) = self.gfx.size_dips(self.hwnd);
+                let (top, lh) = Self::list_area(h);
+                if y < top || y >= top + lh {
+                    self.arm_drag_timer(DRAG_REPEAT_MS);
+                }
+            }
+            None => {
+                let hover = match self.hit(x, y) {
+                    Hit::Scrollbar(p) => Some(p),
+                    _ => None,
+                };
+                if hover != self.hover_bar {
+                    self.hover_bar = hover;
+                    self.invalidate();
+                }
+            }
+        }
+    }
+
+    pub fn on_mouse_leave(&mut self) {
+        if self.hover_bar.take().is_some() {
+            self.invalidate();
+        }
+    }
+
+    fn arm_drag_timer(&mut self, ms: u32) {
+        if !self.drag_timer {
+            win::set_timer(self.hwnd, TIMER_DRAG, ms);
+            self.drag_timer = true;
+        }
+    }
+
+    fn drag_tick(&mut self) {
+        match self.drag {
+            Some(Drag::Page { panel, y }) => {
+                self.page_towards(panel, y);
+                self.arm_drag_timer(DRAG_REPEAT_MS);
+            }
+            Some(Drag::Mark { panel, y, .. }) => {
+                let (_, h) = self.gfx.size_dips(self.hwnd);
+                let (top, lh) = Self::list_area(h);
+                if y < top || y >= top + lh {
+                    // Farther outside the list = faster.
+                    let dist = if y < top { top - y } else { y - (top + lh) };
+                    let rows = (1.0 + dist / ROW_H).min(10.0) as isize;
+                    self.panels[panel].scroll(if y < top { -rows } else { rows });
+                    self.extend_mark();
+                    self.arm_drag_timer(DRAG_REPEAT_MS);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Left click into the scrollbar zone: grab the thumb or start paging.
+    fn press_scrollbar(&mut self, p: usize, y: f32) -> bool {
+        let (w, h) = self.gfx.size_dips(self.hwnd);
+        let Some(sb) = self.scrollbar(p, w, h) else { return false };
+        if y >= sb.thumb_y && y < sb.thumb_y + sb.thumb_h {
+            self.drag = Some(Drag::Thumb { panel: p, grab: y - sb.thumb_y });
+        } else {
+            self.drag = Some(Drag::Page { panel: p, y });
+            self.page_towards(p, y);
+            self.arm_drag_timer(win::repeat_delay_ms());
+        }
+        true
+    }
+
+    /// Scroll one page towards `y`; stops once the thumb is under the mouse.
+    fn page_towards(&mut self, p: usize, y: f32) {
+        let (w, h) = self.gfx.size_dips(self.hwnd);
+        let Some(sb) = self.scrollbar(p, w, h) else { return };
+        let page = self.panels[p].page();
+        if y < sb.thumb_y {
+            self.panels[p].scroll(-page);
+        } else if y >= sb.thumb_y + sb.thumb_h {
+            self.panels[p].scroll(page);
+        } else {
+            return;
+        }
+        self.invalidate();
+    }
+
+    /// Move the thumb so its top is at `thumb_y`.
+    fn drag_thumb(&mut self, p: usize, thumb_y: f32) {
+        let (w, h) = self.gfx.size_dips(self.hwnd);
+        let Some(sb) = self.scrollbar(p, w, h) else { return };
+        let (top, lh) = Self::list_area(h);
+        let range = lh - sb.thumb_h;
+        let frac = if range > 0.0 { ((thumb_y - top) / range).clamp(0.0, 1.0) } else { 0.0 };
+        let panel = &mut self.panels[p];
+        let new_top = (frac * panel.max_top() as f32).round() as usize;
+        if new_top != panel.top {
+            panel.scroll_to(new_top);
+            self.invalidate();
+        }
+    }
+
+    /// Right-drag: mark every row from the last one up to the row under the mouse
+    /// (clamped to the visible rows) and put the cursor there.
+    fn extend_mark(&mut self) {
+        let Some(Drag::Mark { panel, marked, last, y }) = self.drag else { return };
+        let (_, h) = self.gfx.size_dips(self.hwnd);
+        let (top, _) = Self::list_area(h);
+        let p = &mut self.panels[panel];
+        let len = p.entries.len();
+        if len == 0 {
+            return;
+        }
+        let first_vis = p.top;
+        let last_vis = (p.top + p.rows_visible).min(len) - 1;
+        let row = (p.top as f32 + ((y - top) / ROW_H).floor()).clamp(first_vis as f32, last_vis as f32) as usize;
+        let last = last.min(len - 1);
+        for i in row.min(last)..=row.max(last) {
+            p.set_mark(i, marked);
+        }
+        p.cursor = row;
+        self.drag = Some(Drag::Mark { panel, marked, last: row, y });
         self.invalidate();
     }
 
@@ -1214,12 +1445,22 @@ impl App {
         }
         c.unclip();
 
-        // Scrollbar (display only)
-        let n = p.entries.len();
-        if n > p.rows_visible && lh > 0.0 {
-            let th = (lh * p.rows_visible as f32 / n as f32).max(24.0);
-            let ty = top + (lh - th) * p.top as f32 / (n - p.rows_visible) as f32;
-            c.fill_round(rect(x + pw - 7.0, ty + 2.0, 4.0, th - 4.0), 2.0, t.scroll_thumb);
+        // Scrollbar: thin at rest, wider and brighter under the mouse or while dragged.
+        if let Some(sb) = self.scrollbar(i, w, h) {
+            let dragging = matches!(self.drag, Some(Drag::Thumb { panel, .. }) if panel == i);
+            let paging = matches!(self.drag, Some(Drag::Page { panel, .. }) if panel == i);
+            let hot = dragging || paging || (self.drag.is_none() && self.hover_bar == Some(i));
+            let (bw, col) = if dragging {
+                (8.0, t.scroll_thumb_drag)
+            } else if hot {
+                (8.0, t.scroll_thumb_hover)
+            } else {
+                (4.0, t.scroll_thumb)
+            };
+            if hot {
+                c.fill_round(rect(x + pw - 13.0, top + 2.0, 12.0, lh - 4.0), 6.0, t.scroll_track);
+            }
+            c.fill_round(rect(x + pw - 3.0 - bw, sb.thumb_y + 2.0, bw, sb.thumb_h - 4.0), bw / 2.0, col);
         }
 
         // Status bar

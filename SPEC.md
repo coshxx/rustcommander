@@ -69,6 +69,18 @@ the steady-state frame time).
 | Shift+F8, Shift+Del | Delete permanently (with confirmation) |
 | Esc (while a job runs) | Cancel the job |
 
+### Mouse
+
+| Action | Effect |
+|---|---|
+| Click / double-click | Set cursor / open |
+| Right click | Set cursor and toggle mark |
+| Right drag | Every row passed gets the state of the first one; scrolls automatically past the list's edges |
+| Wheel | Scrolls the view only; the cursor stays on its entry (may leave the view). The next key press brings it back. |
+| Scrollbar | Drag the thumb; click the track to page towards the mouse (auto-repeat after the system keyboard delay, stops at the mouse). Wider and brighter on hover. |
+
+Auto-refresh keeps the scroll position as well; only navigation scrolls to the cursor.
+
 On startup the last directories and the window position are restored
 (`%APPDATA%\RustCommander\config.ini`).
 
@@ -93,5 +105,6 @@ On startup the last directories and the window position are restored
 
 ## Deliberately later
 
-Parallel copying of many small files, system icons (async, cached), live filter, light theme, settings, normalizing path casing
+Parallel copying of many small files, shell context menu (long right press / Shift+F10, since a
+right click marks), system icons (async, cached), live filter, light theme, settings, normalizing path casing
 (typed `c:\windows` → `C:\Windows`), partial redraws (if frame time on large windows becomes an issue).

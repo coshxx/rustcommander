@@ -13,7 +13,10 @@ use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
 use windows::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VIRTUAL_KEY};
 use windows::Win32::UI::Shell::ShellExecuteW;
-use windows::Win32::UI::WindowsAndMessaging::{KillTimer, PostMessageW, SW_SHOWNORMAL, SetTimer};
+use windows::Win32::UI::WindowsAndMessaging::{
+    KillTimer, PostMessageW, SPI_GETKEYBOARDDELAY, SW_SHOWNORMAL, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetTimer,
+    SystemParametersInfoW,
+};
 use windows::core::{PCWSTR, w};
 
 use crate::fsx::to_wide_z;
@@ -54,6 +57,21 @@ impl SendHwnd {
             let _ = PostMessageW(Some(HWND(self.0 as *mut _)), msg, WPARAM(wparam), LPARAM(0));
         }
     }
+}
+
+/// Keyboard repeat delay from the system settings (250–1000 ms), used for
+/// auto-repeat of mouse actions like paging on the scrollbar track.
+pub fn repeat_delay_ms() -> u32 {
+    let mut v: u32 = 1;
+    let _ = unsafe {
+        SystemParametersInfoW(
+            SPI_GETKEYBOARDDELAY,
+            0,
+            Some(&mut v as *mut u32 as *mut _),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    };
+    (v.min(3) + 1) * 250
 }
 
 pub fn key_down(vk: VIRTUAL_KEY) -> bool {

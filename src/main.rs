@@ -28,7 +28,9 @@ use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForSystem, GetDpiForWindow,
     SetProcessDpiAwarenessContext,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{SetFocus, VIRTUAL_KEY};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    ReleaseCapture, SetCapture, SetFocus, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VIRTUAL_KEY,
+};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::w;
 
@@ -187,6 +189,9 @@ pub fn window_placement(hwnd: HWND) -> Option<([i32; 4], bool)> {
     Some(([r.left, r.top, r.right, r.bottom], wp.showCmd == SW_SHOWMAXIMIZED.0 as u32))
 }
 
+/// Lives in the `Win32_UI_Controls` feature of the `windows` crate; not worth the extra feature.
+const WM_MOUSELEAVE: u32 = 0x02A3;
+
 fn mouse_dips(app: &App, lp: LPARAM) -> (f32, f32) {
     let x = (lp.0 & 0xffff) as i16 as f32;
     let y = ((lp.0 >> 16) & 0xffff) as i16 as f32;
@@ -248,13 +253,52 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
             app.on_char(wp.0 as u16);
             true
         })),
-        WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => {
+        WM_LBUTTONDOWN | WM_LBUTTONDBLCLK | WM_RBUTTONDOWN | WM_RBUTTONDBLCLK => {
             let _ = unsafe { SetFocus(Some(hwnd)) };
-            done(cell.with(|app| {
+            let right = matches!(msg, WM_RBUTTONDOWN | WM_RBUTTONDBLCLK);
+            let capture = cell.with(|app| {
                 let (x, y) = mouse_dips(app, lp);
-                app.on_click(x, y, msg == WM_LBUTTONDBLCLK);
-                true
-            }))
+                app.on_button_down(x, y, right, msg == WM_LBUTTONDBLCLK)
+            });
+            // Capture changes send messages synchronously – hence outside of `with`.
+            if capture == Some(true) {
+                unsafe { SetCapture(hwnd) };
+            }
+            LRESULT(0)
+        }
+        // Handled (no DefWindowProc) so a right click doesn't produce WM_CONTEXTMENU.
+        WM_LBUTTONUP | WM_RBUTTONUP => {
+            let ended = cell.with(|app| {
+                let (x, y) = mouse_dips(app, lp);
+                app.on_button_up(x, y, msg == WM_RBUTTONUP)
+            });
+            if ended == Some(true) {
+                let _ = unsafe { ReleaseCapture() };
+            }
+            LRESULT(0)
+        }
+        WM_MOUSEMOVE => {
+            // Ask for WM_MOUSELEAVE so the scrollbar hover ends when the mouse leaves the window.
+            let mut tme = TRACKMOUSEEVENT {
+                cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
+                dwFlags: TME_LEAVE,
+                hwndTrack: hwnd,
+                dwHoverTime: 0,
+            };
+            let _ = unsafe { TrackMouseEvent(&mut tme) };
+            cell.with(|app| {
+                let (x, y) = mouse_dips(app, lp);
+                app.on_mouse_move(x, y);
+            });
+            LRESULT(0)
+        }
+        WM_MOUSELEAVE => {
+            cell.with(|app| app.on_mouse_leave());
+            LRESULT(0)
+        }
+        WM_CAPTURECHANGED => {
+            cell.with(|app| app.cancel_drag());
+            LRESULT(0)
         }
         WM_MOUSEWHEEL => {
             let mut pt = POINT { x: (lp.0 & 0xffff) as i16 as i32, y: ((lp.0 >> 16) & 0xffff) as i16 as i32 };

@@ -38,6 +38,9 @@ pub struct Theme {
     pub popup_border: Color,
     pub edit_bg: Color,
     pub scroll_thumb: Color,
+    pub scroll_thumb_hover: Color,
+    pub scroll_thumb_drag: Color,
+    pub scroll_track: Color,
 
     pub icon_folder: Color,
     pub icon_parent: Color,
@@ -70,6 +73,9 @@ pub const DARK: Theme = Theme {
     popup_border: rgb(0x3a3f4b),
     edit_bg: rgb(0x0f1115),
     scroll_thumb: rgba(0xffffff, 0.16),
+    scroll_thumb_hover: rgba(0xffffff, 0.32),
+    scroll_thumb_drag: rgba(0xffffff, 0.46),
+    scroll_track: rgba(0xffffff, 0.04),
 
     icon_folder: rgb(0xe8b04a),
     icon_parent: rgb(0x80868f),
