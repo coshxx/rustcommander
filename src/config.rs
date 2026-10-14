@@ -10,7 +10,11 @@ pub struct Config {
     pub window: Option<([i32; 4], bool)>,
 }
 
+/// `RC_CONFIG_DIR` overrides the location (used for tests, keeps the real config untouched).
 pub fn dir() -> Option<PathBuf> {
+    if let Some(d) = std::env::var_os("RC_CONFIG_DIR") {
+        return Some(PathBuf::from(d));
+    }
     std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("RustCommander"))
 }
 

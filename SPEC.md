@@ -59,12 +59,39 @@ the steady-state frame time).
 | Ctrl+L, click on path | Edit path (Ctrl+V, environment variables) |
 | Ctrl+R, F2 | Reload |
 | Type letters | Quick search (jumps to first match), Esc cancels |
+| Insert, Space | Toggle mark and move down (Space only when no quick search is active) |
+| Shift+↑ / Shift+↓ | Toggle mark and move |
+| Ctrl+A | Mark all / unmark all |
+| F5 / F6 | Copy / move marked entries (or the one under the cursor) to the other pane |
+| Shift+F6 | Rename |
+| F7 | New directory (`a\b` creates nested directories) |
+| F8, Del | Move to recycle bin (with confirmation) |
+| Shift+F8, Shift+Del | Delete permanently (with confirmation) |
+| Esc (while a job runs) | Cancel the job |
 
 On startup the last directories and the window position are restored
 (`%APPDATA%\RustCommander\config.ini`).
 
+## File operations
+
+- Run on a worker thread (`ops.rs`); progress card appears after 200 ms (files, bytes, %).
+- Copy/move destination: an existing directory, or a path ending in `\`, means "into";
+  a single source with a non-existing destination means "copy/move with a new name".
+- Conflicts ask: overwrite / skip / overwrite all / skip all / cancel.
+- Copy uses `CopyFileExW` (cancellable mid-file). Same-volume move is a rename;
+  cross-volume move copies each file and deletes the source only after a successful copy.
+- Moving onto an existing directory merges the contents.
+- Permanent delete never follows junctions/symlinks (the link is removed, not the target's
+  contents). Read-only files are handled.
+- Recycle bin via `SHFileOperationW` with `FOF_WANTNUKEWARNING`: if a file can't be
+  recycled (e.g. network drive), the shell asks before deleting it for good.
+- Copy into itself / onto itself is refused.
+- Panes refresh automatically on directory changes (`FindFirstChangeNotificationW`, throttled
+  to one reload per 250 ms); cursor, scroll position and marks survive the reload.
+- Tests: `cargo test` runs the operations against throw-away directories in `%TEMP%`.
+  `RC_CONFIG_DIR` points the app to a separate config (used for GUI tests).
+
 ## Deliberately later
 
-File operations (copy/move/delete) + selection, automatic refresh (`ReadDirectoryChangesW`),
-system icons (async, cached), live filter, light theme, settings, normalizing path casing
+Parallel copying of many small files, system icons (async, cached), live filter, light theme, settings, normalizing path casing
 (typed `c:\windows` → `C:\Windows`), partial redraws (if frame time on large windows becomes an issue).

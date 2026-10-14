@@ -37,6 +37,7 @@ pub struct Entry {
     pub size: u64,
     /// FILETIME (100 ns ticks since 1601, UTC).
     pub mtime: u64,
+    pub marked: bool,
 }
 
 impl Entry {
@@ -55,6 +56,7 @@ impl Entry {
             hidden: false,
             size: 0,
             mtime: 0,
+            marked: false,
         }
     }
 }
@@ -245,6 +247,7 @@ pub fn load(path: &Path, cancel: &AtomicBool) -> Result<Listing, String> {
                 size: if is_dir { 0 } else { size },
                 mtime: ((data.ftLastWriteTime.dwHighDateTime as u64) << 32)
                     | data.ftLastWriteTime.dwLowDateTime as u64,
+                marked: false,
             });
         }
         if unsafe { FindNextFileW(handle, &mut data) }.is_err() {
@@ -270,6 +273,9 @@ pub struct Pending {
     pub id: u64,
     pub path: PathBuf,
     pub select: Option<Box<[u16]>>,
+    /// Reload of the same directory: keep the cursor on whatever entry it is on when the
+    /// result arrives (the user may have moved it meanwhile).
+    pub keep_cursor: bool,
     pub cancel: Arc<AtomicBool>,
     pub started: Instant,
 }

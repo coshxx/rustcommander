@@ -46,8 +46,12 @@ impl SendHwnd {
     }
 
     pub fn post(self, msg: u32) {
+        self.post_with(msg, 0);
+    }
+
+    pub fn post_with(self, msg: u32, wparam: usize) {
         unsafe {
-            let _ = PostMessageW(Some(HWND(self.0 as *mut _)), msg, WPARAM(0), LPARAM(0));
+            let _ = PostMessageW(Some(HWND(self.0 as *mut _)), msg, WPARAM(wparam), LPARAM(0));
         }
     }
 }

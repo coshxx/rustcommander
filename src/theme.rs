@@ -31,6 +31,9 @@ pub struct Theme {
     pub cursor_active: Color,
     pub cursor_inactive: Color,
     pub error: Color,
+    pub success: Color,
+    /// Marked (selected for an operation) entries.
+    pub marked: Color,
     pub popup_bg: Color,
     pub popup_border: Color,
     pub edit_bg: Color,
@@ -61,6 +64,8 @@ pub const DARK: Theme = Theme {
     cursor_active: rgb(0x2b4a85),
     cursor_inactive: rgb(0x2d3139),
     error: rgb(0xef6b73),
+    success: rgb(0x7ec27a),
+    marked: rgb(0xf2c14e),
     popup_bg: rgb(0x262932),
     popup_border: rgb(0x3a3f4b),
     edit_bg: rgb(0x0f1115),

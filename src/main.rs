@@ -4,9 +4,11 @@ mod app;
 mod config;
 mod fsx;
 mod gfx;
+mod ops;
 mod panel;
 mod theme;
 mod timing;
+mod watch;
 mod win;
 
 use std::cell::{Cell, UnsafeCell};
@@ -267,7 +269,15 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
             LRESULT(0)
         }
         WM_TIMER => {
-            cell.with(|app| app.on_timer());
+            cell.with(|app| app.on_timer(wp.0));
+            LRESULT(0)
+        }
+        app::WM_APP_JOB => {
+            cell.with(|app| app.on_job());
+            LRESULT(0)
+        }
+        app::WM_APP_DIRCHANGED => {
+            cell.with(|app| app.on_dir_changed(wp.0));
             LRESULT(0)
         }
         WM_CLOSE => {

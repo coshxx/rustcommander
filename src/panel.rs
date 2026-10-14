@@ -1,12 +1,14 @@
 //! State of one file list: directory, entries, cursor, scroll position, quick search.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::time::Instant;
 
-use crate::fsx::{self, Entry, Listing, Loaded, Pending};
+use crate::fsx::{self, Entry, Kind, Listing, Loaded, Pending};
+use crate::watch::Watcher;
 use crate::win::SendHwnd;
 
 pub const WM_APP_LOADED: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 1;
@@ -34,10 +36,24 @@ pub struct Panel {
     pub dirs: usize,
     pub files: usize,
     pub bytes: u64,
+    /// Watches `dir` for changes; replaced whenever `dir` changes.
+    pub watcher: Option<Watcher>,
+}
+
+/// Outcome of `Panel::apply`.
+pub enum Applied {
+    /// Result of a superseded load; ignored.
+    Stale,
+    Ok { dir_changed: bool },
+    Failed { path: PathBuf },
 }
 
 impl Panel {
     pub fn navigate(&mut self, index: usize, path: PathBuf, select: Option<Box<[u16]>>, sink: &LoadSink) {
+        self.start_load(index, path, select, false, sink);
+    }
+
+    fn start_load(&mut self, index: usize, path: PathBuf, select: Option<Box<[u16]>>, keep_cursor: bool, sink: &LoadSink) {
         if let Some(p) = self.pending.take() {
             p.cancel.store(true, Ordering::Relaxed);
         }
@@ -47,6 +63,7 @@ impl Panel {
             id,
             path: path.clone(),
             select,
+            keep_cursor,
             cancel: cancel.clone(),
             started: Instant::now(),
         });
@@ -63,9 +80,14 @@ impl Panel {
         });
     }
 
+    /// Reload the current directory, keeping cursor, scroll position and marks.
     pub fn reload(&mut self, index: usize, sink: &LoadSink) {
-        let sel = self.current().map(|e| e.name.clone());
-        self.navigate(index, self.dir.clone(), sel, sink);
+        if self.dir.as_os_str().is_empty() {
+            return;
+        }
+        let search = std::mem::take(&mut self.search);
+        self.start_load(index, self.dir.clone(), None, true, sink);
+        self.search = search;
     }
 
     pub fn go_up(&mut self, index: usize, sink: &LoadSink) {
@@ -84,34 +106,90 @@ impl Panel {
         }
     }
 
-    /// Apply a result if it is still the current one. `true` = applied.
-    pub fn apply(&mut self, id: u64, result: Result<Listing, String>) -> bool {
+    /// Apply a load result if it is still the current one.
+    pub fn apply(&mut self, id: u64, result: Result<Listing, String>) -> Applied {
         let Some(p) = self.pending.take_if(|p| p.id == id) else {
-            return false;
+            return Applied::Stale;
         };
         match result {
             Ok(l) => {
                 let same_dir = l.dir == self.dir;
-                let select = l.select.or(p.select);
+                let keep = same_dir && p.keep_cursor;
+                let select = l.select.or(if keep { self.current().map(|e| e.name.clone()) } else { p.select });
+                let marked: HashSet<Box<[u16]>> = if same_dir {
+                    self.entries.iter().filter(|e| e.marked).map(|e| e.name.clone()).collect()
+                } else {
+                    HashSet::new()
+                };
+                let old_cursor = self.cursor;
                 self.dir = l.dir;
                 self.entries = l.entries;
                 self.dirs = l.dirs;
                 self.files = l.files;
                 self.bytes = l.bytes;
                 self.error = None;
+                if !marked.is_empty() {
+                    for e in &mut self.entries {
+                        e.marked = marked.contains(&e.name);
+                    }
+                }
+                // Selected entry gone (e.g. deleted)? Stay at the same position.
                 let idx = select
                     .and_then(|s| self.entries.iter().position(|e| *e.name == *s))
-                    .unwrap_or(0);
+                    .unwrap_or(if same_dir { old_cursor } else { 0 });
                 if !same_dir {
                     self.top = 0;
                 }
                 self.set_cursor(idx);
+                Applied::Ok { dir_changed: !same_dir }
             }
             Err(e) => {
                 self.error = Some(format!("{}: {}", p.path.display(), e.trim()));
+                Applied::Failed { path: p.path }
             }
         }
-        true
+    }
+
+    // ---------- marks ----------
+
+    pub fn toggle_mark(&mut self) {
+        if let Some(e) = self.entries.get_mut(self.cursor) {
+            if e.kind != Kind::Parent {
+                e.marked = !e.marked;
+            }
+        }
+    }
+
+    /// Mark everything; if everything is marked already, unmark everything.
+    pub fn mark_all(&mut self) {
+        let all = self.entries.iter().filter(|e| e.kind != Kind::Parent).all(|e| e.marked);
+        for e in self.entries.iter_mut().filter(|e| e.kind != Kind::Parent) {
+            e.marked = !all;
+        }
+    }
+
+    pub fn clear_marks(&mut self) {
+        for e in &mut self.entries {
+            e.marked = false;
+        }
+    }
+
+    /// Number of marked entries and the total size of the marked files.
+    pub fn marked(&self) -> (usize, u64) {
+        self.entries.iter().filter(|e| e.marked).fold((0, 0), |(n, b), e| (n + 1, b + e.size))
+    }
+
+    /// What an operation acts on: the marked entries, or else the entry under the cursor.
+    pub fn targets(&self) -> Vec<PathBuf> {
+        let marked: Vec<PathBuf> =
+            self.entries.iter().filter(|e| e.marked).map(|e| self.dir.join(e.os_name())).collect();
+        if !marked.is_empty() {
+            return marked;
+        }
+        match self.current() {
+            Some(e) if e.kind != Kind::Parent => vec![self.dir.join(e.os_name())],
+            _ => Vec::new(),
+        }
     }
 
     pub fn current(&self) -> Option<&Entry> {

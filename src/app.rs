@@ -1,22 +1,35 @@
 //! Application state, input handling and drawing.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, channel};
+use std::time::Instant;
 
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
-use windows::Win32::UI::WindowsAndMessaging::WM_CLOSE;
+use windows::Win32::UI::WindowsAndMessaging::{WM_APP, WM_CLOSE};
 
 use crate::config::Config;
 use crate::fsx::{self, Kind, Loaded};
-use crate::gfx::{Canvas, Gfx, rect};
-use crate::panel::{LoadSink, Panel};
+use crate::gfx::{Canvas, Gfx, Rect, rect};
+use crate::ops::{self, Answer, Job};
+use crate::panel::{Applied, LoadSink, Panel};
 use crate::theme::{Color, DARK, Theme};
 use crate::timing::Timing;
+use crate::watch::Watcher;
 use crate::win::{self, Drive, SendHwnd};
 
 pub const LOADING_DELAY_MS: u32 = 150;
+pub const WM_APP_JOB: u32 = WM_APP + 2;
+pub const WM_APP_DIRCHANGED: u32 = WM_APP + 3;
+
 const TIMER_LOADING: usize = 1;
+const TIMER_REFRESH: [usize; 2] = [2, 3];
+const TIMER_NOTICE: usize = 4;
+const TIMER_JOB: usize = 5;
+/// Directory change notifications trigger at most one reload per this interval.
+const REFRESH_THROTTLE_MS: u32 = 250;
+/// Short jobs (rename, mkdir) finish before their progress card would appear.
+const JOB_CARD_DELAY_MS: u32 = 200;
 
 // Layout in DIPs.
 const PATH_H: f32 = 38.0;
@@ -30,21 +43,75 @@ const PAD: f32 = 12.0;
 const ICON_W: f32 = 24.0;
 const CHIP_W: f32 = 40.0;
 const POPUP_W: f32 = 230.0;
+const CARD_W: f32 = 400.0;
 
-const HINTS: [(&str, &str); 7] = [
+const HINTS: [(&str, &str); 9] = [
     ("Tab", "Seite"),
-    ("Enter", "Öffnen"),
-    ("⌫", "Hoch"),
+    ("Einfg", "Markieren"),
+    ("F5", "Kopieren"),
+    ("F6", "Verschieben"),
+    ("⇧F6", "Umbenennen"),
+    ("F7", "Ordner"),
+    ("F8", "Löschen"),
     ("Alt+F1/F2", "Laufwerk"),
     ("Strg+L", "Pfad"),
-    ("Strg+R", "Neu laden"),
-    ("A–Z", "Suchen"),
 ];
 
-struct LineEdit {
-    panel: usize,
+/// Single-line text input (path bar and dialogs).
+struct TextInput {
     text: Vec<u16>,
     caret: usize,
+}
+
+impl TextInput {
+    fn new(text: Vec<u16>) -> TextInput {
+        let caret = text.len();
+        TextInput { text, caret }
+    }
+
+    /// Editing keys; `true` = handled.
+    fn key(&mut self, vk: VIRTUAL_KEY, ctrl: bool, hwnd: HWND) -> bool {
+        match vk {
+            VK_LEFT => self.caret = self.caret.saturating_sub(1),
+            VK_RIGHT => self.caret = (self.caret + 1).min(self.text.len()),
+            VK_HOME => self.caret = 0,
+            VK_END => self.caret = self.text.len(),
+            VK_BACK => {
+                if self.caret > 0 {
+                    self.caret -= 1;
+                    self.text.remove(self.caret);
+                }
+            }
+            VK_DELETE => {
+                if self.caret < self.text.len() {
+                    self.text.remove(self.caret);
+                }
+            }
+            VK_V if ctrl => {
+                if let Some(clip) = win::clipboard_text(hwnd) {
+                    let clip: Vec<u16> = clip.into_iter().filter(|&c| c >= 0x20).collect();
+                    let n = clip.len();
+                    self.text.splice(self.caret..self.caret, clip);
+                    self.caret += n;
+                }
+            }
+            VK_A if ctrl => {
+                self.text.clear();
+                self.caret = 0;
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    fn insert(&mut self, c: u16) {
+        self.text.insert(self.caret, c);
+        self.caret += 1;
+    }
+
+    fn string(&self) -> String {
+        String::from_utf16_lossy(&self.text)
+    }
 }
 
 struct DrivePopup {
@@ -53,10 +120,43 @@ struct DrivePopup {
     sel: usize,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DialogKind {
+    Copy,
+    Move,
+    Delete { recycle: bool },
+    Rename,
+    MkDir,
+}
+
+impl DialogKind {
+    fn title(self) -> &'static str {
+        match self {
+            DialogKind::Copy => "Kopieren",
+            DialogKind::Move => "Verschieben",
+            DialogKind::Delete { recycle: true } => "In den Papierkorb",
+            DialogKind::Delete { recycle: false } => "Endgültig löschen",
+            DialogKind::Rename => "Umbenennen",
+            DialogKind::MkDir => "Neuer Ordner",
+        }
+    }
+}
+
+struct Dialog {
+    kind: DialogKind,
+    panel: usize,
+    sources: Vec<PathBuf>,
+    message: String,
+    input: Option<TextInput>,
+}
+
 enum Mode {
     Normal,
-    PathEdit(LineEdit),
+    PathEdit { panel: usize, input: TextInput },
     Drives(DrivePopup),
+    Dialog(Dialog),
+    /// A running job waits for an answer about this existing target.
+    Conflict(PathBuf),
 }
 
 enum Hit {
@@ -66,6 +166,26 @@ enum Hit {
     Panel(usize),
     Popup(usize),
     Nothing,
+}
+
+struct RunningJob {
+    handle: ops::Handle,
+    title: &'static str,
+    progress: ops::Progress,
+    source_panel: usize,
+    started: Instant,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Tone {
+    Success,
+    Info,
+    Error,
+}
+
+struct Notice {
+    text: String,
+    tone: Tone,
 }
 
 pub struct App {
@@ -79,6 +199,9 @@ pub struct App {
     rx: Receiver<Loaded>,
     theme: &'static Theme,
     hint_widths: Option<Vec<(f32, f32)>>,
+    job: Option<RunningJob>,
+    notice: Option<Notice>,
+    refresh_armed: [bool; 2],
     painted: bool,
     painted_content: bool,
 }
@@ -137,8 +260,22 @@ fn drive_info(kind: u32) -> (u16, &'static str) {
     }
 }
 
+/// „name“ for a single item, otherwise "N Elemente".
+fn describe(sources: &[PathBuf]) -> String {
+    match sources {
+        [one] => format!("„{}“", one.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()),
+        many => format!("{} Elemente", many.len()),
+    }
+}
+
+/// File name check; `allow_sep` permits `\` for nested new directories.
+fn valid_name(name: &str, allow_sep: bool) -> bool {
+    let bad = |c: char| matches!(c, '<' | '>' | ':' | '"' | '/' | '|' | '?' | '*') || (c == '\\' && !allow_sep);
+    !name.is_empty() && name != "." && name != ".." && !name.chars().any(|c| bad(c) || (c as u32) < 0x20)
+}
+
 /// Turn path bar input into an absolute path.
-fn parse_path(input: &[u16], base: &std::path::Path) -> Option<PathBuf> {
+fn parse_path(input: &[u16], base: &Path) -> Option<PathBuf> {
     let expanded = win::expand_env(input);
     let mut s = String::from_utf16_lossy(&expanded).trim().trim_matches('"').to_string();
     if s.is_empty() {
@@ -178,6 +315,9 @@ impl App {
             rx,
             theme: &DARK,
             hint_widths: None,
+            job: None,
+            notice: None,
+            refresh_armed: [false; 2],
             painted: false,
             painted_content: false,
         };
@@ -205,6 +345,12 @@ impl App {
         win::invalidate(self.hwnd);
     }
 
+    fn notify(&mut self, text: String, tone: Tone) {
+        self.notice = Some(Notice { text, tone });
+        win::set_timer(self.hwnd, TIMER_NOTICE, if tone == Tone::Error { 8000 } else { 4000 });
+        self.invalidate();
+    }
+
     pub fn on_loaded(&mut self) {
         while let Ok(l) = self.rx.try_recv() {
             let info = match &l.result {
@@ -217,20 +363,128 @@ impl App {
                 Err(e) => format!("  error: {}", e.trim()),
             };
             let p = l.panel;
-            if self.panels[p].apply(l.id, l.result) {
-                self.timing.note(info);
-                // Start path broken (e.g. drive gone)? Fall back to C:\.
-                if self.panels[p].entries.is_empty() && self.panels[p].dir.as_os_str().is_empty() {
-                    self.nav(p, PathBuf::from(r"C:\"), None);
+            match self.panels[p].apply(l.id, l.result) {
+                Applied::Stale => continue,
+                Applied::Ok { dir_changed } => {
+                    if dir_changed || self.panels[p].watcher.is_none() {
+                        let dir = &self.panels[p].dir;
+                        self.panels[p].watcher = Watcher::new(dir, SendHwnd::new(self.hwnd), WM_APP_DIRCHANGED, p);
+                    }
+                }
+                Applied::Failed { path } => {
+                    let dir = self.panels[p].dir.clone();
+                    if dir.as_os_str().is_empty() {
+                        // Start path broken (e.g. drive gone)? Fall back to C:\.
+                        if path != Path::new(r"C:\") {
+                            self.nav(p, PathBuf::from(r"C:\"), None);
+                        }
+                    } else if path == dir {
+                        // The shown directory can't be read anymore (deleted?): go up.
+                        if let Some(parent) = dir.parent() {
+                            self.nav(p, parent.to_path_buf(), None);
+                        }
+                    }
+                }
+            }
+            self.timing.note(info);
+        }
+        self.invalidate();
+    }
+
+    pub fn on_dir_changed(&mut self, panel: usize) {
+        if panel < 2 && !self.refresh_armed[panel] {
+            self.refresh_armed[panel] = true;
+            win::set_timer(self.hwnd, TIMER_REFRESH[panel], REFRESH_THROTTLE_MS);
+        }
+    }
+
+    pub fn on_timer(&mut self, id: usize) {
+        win::kill_timer(self.hwnd, id);
+        match id {
+            TIMER_NOTICE => self.notice = None,
+            _ if TIMER_REFRESH.contains(&id) => {
+                let i = if id == TIMER_REFRESH[0] { 0 } else { 1 };
+                self.refresh_armed[i] = false;
+                if self.panels[i].pending.is_none() {
+                    self.panels[i].reload(i, &self.sink);
+                }
+            }
+            _ => {}
+        }
+        self.invalidate();
+    }
+
+    // ---------- Jobs ----------
+
+    fn start_job(&mut self, job: Job, title: &'static str, source_panel: usize) {
+        let handle = ops::start(job, Some((SendHwnd::new(self.hwnd), WM_APP_JOB)));
+        self.job = Some(RunningJob {
+            handle,
+            title,
+            progress: ops::Progress::default(),
+            source_panel,
+            started: Instant::now(),
+        });
+        self.notice = None;
+        win::set_timer(self.hwnd, TIMER_JOB, JOB_CARD_DELAY_MS + 10);
+    }
+
+    pub fn on_job(&mut self) {
+        loop {
+            let Some(job) = &mut self.job else { break };
+            let Ok(ev) = job.handle.events.try_recv() else { break };
+            match ev {
+                ops::Event::Progress(p) => job.progress = p,
+                ops::Event::Conflict(path) => self.mode = Mode::Conflict(path),
+                ops::Event::Done(summary) => {
+                    if let Some(job) = self.job.take() {
+                        self.finish_job(job, summary);
+                    }
                 }
             }
         }
         self.invalidate();
     }
 
-    pub fn on_timer(&mut self) {
-        win::kill_timer(self.hwnd, TIMER_LOADING);
-        self.invalidate();
+    fn finish_job(&mut self, job: RunningJob, s: ops::Summary) {
+        if matches!(self.mode, Mode::Conflict(_)) {
+            self.mode = Mode::Normal;
+        }
+        let (text, tone) = if let Some(first) = s.errors.first() {
+            let more = if s.errors.len() > 1 { format!(" (+{} weitere)", s.errors.len() - 1) } else { String::new() };
+            (format!("{}: {first}{more}", job.title), Tone::Error)
+        } else if s.cancelled {
+            (format!("{} abgebrochen", job.title), Tone::Info)
+        } else {
+            let what = if s.done == 1 { "Element" } else { "Elemente" };
+            (format!("{}: fertig ({} {what})", job.title, s.done), Tone::Success)
+        };
+        self.notify(text, tone);
+        if s.errors.is_empty() && !s.cancelled {
+            self.panels[job.source_panel].clear_marks();
+        }
+        for i in 0..2 {
+            let dir = self.panels[i].dir.clone();
+            // Put the cursor on a new/renamed entry if it lives in this panel.
+            let select = s
+                .select
+                .as_ref()
+                .and_then(|p| p.strip_prefix(&dir).ok())
+                .and_then(|rel| rel.components().next())
+                .map(|c| fsx::to_wide_z(c.as_os_str()))
+                .map(|w| w[..w.len() - 1].into());
+            match select {
+                Some(name) => self.nav(i, dir, Some(name)),
+                None => self.panels[i].reload(i, &self.sink),
+            }
+        }
+    }
+
+    fn answer_conflict(&mut self, a: Answer) {
+        if let Some(job) = &self.job {
+            job.handle.answer(a);
+        }
+        self.mode = Mode::Normal;
     }
 
     // ---------- Layout ----------
@@ -281,7 +535,7 @@ impl App {
         Hit::Panel(p)
     }
 
-    fn popup_rect(&self, px: f32, n: usize) -> crate::gfx::Rect {
+    fn popup_rect(&self, px: f32, n: usize) -> Rect {
         rect(px + PAD - 4.0, PATH_H - 2.0, POPUP_W, n as f32 * ROW_H + 8.0)
     }
 
@@ -334,17 +588,102 @@ impl App {
 
     fn start_path_edit(&mut self, panel: usize) {
         self.active = panel;
-        let text: Vec<u16> = wide(&self.panels[panel].dir.display().to_string());
-        let caret = text.len();
-        self.mode = Mode::PathEdit(LineEdit { panel, text, caret });
+        let text = wide(&self.panels[panel].dir.display().to_string());
+        self.mode = Mode::PathEdit { panel, input: TextInput::new(text) };
     }
 
     fn commit_path_edit(&mut self) {
-        if let Mode::PathEdit(e) = std::mem::replace(&mut self.mode, Mode::Normal) {
-            if let Some(p) = parse_path(&e.text, &self.panels[e.panel].dir) {
-                self.nav(e.panel, p, None);
+        if let Mode::PathEdit { panel, input } = std::mem::replace(&mut self.mode, Mode::Normal) {
+            if let Some(p) = parse_path(&input.text, &self.panels[panel].dir) {
+                self.nav(panel, p, None);
             }
         }
+    }
+
+    fn open_dialog(&mut self, kind: DialogKind) {
+        if self.job.is_some() {
+            self.notify("Es läuft bereits ein Vorgang".into(), Tone::Error);
+            return;
+        }
+        let a = self.active;
+        let p = &self.panels[a];
+        let (sources, message, input) = match kind {
+            DialogKind::Copy | DialogKind::Move => {
+                let sources = p.targets();
+                let mut dest = self.panels[a ^ 1].dir.display().to_string();
+                if !dest.ends_with('\\') {
+                    dest.push('\\');
+                }
+                let verb = if kind == DialogKind::Copy { "kopieren" } else { "verschieben" };
+                let msg = format!("{} {verb} nach:", describe(&sources));
+                (sources, msg, Some(TextInput::new(wide(&dest))))
+            }
+            DialogKind::Delete { recycle } => {
+                let sources = p.targets();
+                let msg = if recycle {
+                    format!("{} in den Papierkorb verschieben?", describe(&sources))
+                } else {
+                    format!("{} endgültig löschen? Das lässt sich nicht rückgängig machen.", describe(&sources))
+                };
+                (sources, msg, None)
+            }
+            DialogKind::Rename => {
+                let Some(e) = p.current().filter(|e| e.kind != Kind::Parent) else { return };
+                let name = e.name.to_vec();
+                // Caret before the extension, like Explorer.
+                let caret = match name.iter().rposition(|&c| c == b'.' as u16) {
+                    Some(dot) if dot > 0 && !e.is_dir() => dot,
+                    _ => name.len(),
+                };
+                let msg = format!("„{}“ umbenennen in:", String::from_utf16_lossy(&name));
+                (vec![p.dir.join(e.os_name())], msg, Some(TextInput { text: name, caret }))
+            }
+            DialogKind::MkDir => {
+                let msg = format!("Neuer Ordner in {}:", p.dir.display());
+                (Vec::new(), msg, Some(TextInput::new(Vec::new())))
+            }
+        };
+        if sources.is_empty() && kind != DialogKind::MkDir {
+            return;
+        }
+        self.panels[a].search.clear();
+        self.mode = Mode::Dialog(Dialog { kind, panel: a, sources, message, input });
+    }
+
+    fn commit_dialog(&mut self) {
+        let Mode::Dialog(d) = std::mem::replace(&mut self.mode, Mode::Normal) else { return };
+        let dir = self.panels[d.panel].dir.clone();
+        let input = d.input.as_ref().map(|i| i.string().trim().to_string()).unwrap_or_default();
+        let job = match d.kind {
+            DialogKind::Copy | DialogKind::Move => {
+                let Some(dest) = parse_path(&wide(&input), &dir) else { return };
+                if d.kind == DialogKind::Copy {
+                    Job::Copy { sources: d.sources, dest }
+                } else {
+                    Job::Move { sources: d.sources, dest }
+                }
+            }
+            DialogKind::Delete { recycle } => Job::Delete { sources: d.sources, recycle },
+            DialogKind::Rename => {
+                let from = d.sources[0].clone();
+                if from.file_name().is_some_and(|n| n == input.as_str()) {
+                    return;
+                }
+                if !valid_name(&input, false) {
+                    self.notify(format!("Ungültiger Name: „{input}“"), Tone::Error);
+                    return;
+                }
+                Job::Rename { from, to: input.into() }
+            }
+            DialogKind::MkDir => {
+                if !valid_name(&input, true) {
+                    self.notify(format!("Ungültiger Name: „{input}“"), Tone::Error);
+                    return;
+                }
+                Job::MkDir { path: dir.join(&input) }
+            }
+        };
+        self.start_job(job, d.kind.title(), d.panel);
     }
 
     // ---------- Input ----------
@@ -352,6 +691,8 @@ impl App {
     /// `true` = handled.
     pub fn on_key(&mut self, vk: VIRTUAL_KEY) -> bool {
         let ctrl = win::key_down(VK_CONTROL);
+        let shift = win::key_down(VK_SHIFT);
+        let hwnd = self.hwnd;
         let handled = match &mut self.mode {
             Mode::Drives(d) => {
                 match vk {
@@ -366,38 +707,40 @@ impl App {
                 }
                 true
             }
-            Mode::PathEdit(e) => {
-                match vk {
-                    VK_LEFT => e.caret = e.caret.saturating_sub(1),
-                    VK_RIGHT => e.caret = (e.caret + 1).min(e.text.len()),
-                    VK_HOME => e.caret = 0,
-                    VK_END => e.caret = e.text.len(),
-                    VK_BACK if e.caret > 0 => {
-                        e.caret -= 1;
-                        e.text.remove(e.caret);
-                    }
-                    VK_DELETE if e.caret < e.text.len() => {
-                        e.text.remove(e.caret);
-                    }
-                    VK_RETURN => self.commit_path_edit(),
-                    VK_ESCAPE => self.mode = Mode::Normal,
-                    VK_V if ctrl => {
-                        if let Some(clip) = win::clipboard_text(self.hwnd) {
-                            let clip: Vec<u16> = clip.into_iter().filter(|&c| c >= 0x20).collect();
-                            let n = clip.len();
-                            e.text.splice(e.caret..e.caret, clip);
-                            e.caret += n;
-                        }
-                    }
-                    VK_A if ctrl => {
-                        e.text.clear();
-                        e.caret = 0;
-                    }
-                    _ => return matches!(vk, VK_BACK | VK_DELETE),
+            Mode::PathEdit { input, .. } => match vk {
+                VK_RETURN => {
+                    self.commit_path_edit();
+                    true
                 }
-                true
-            }
-            Mode::Normal => self.on_key_normal(vk, ctrl),
+                VK_ESCAPE => {
+                    self.mode = Mode::Normal;
+                    true
+                }
+                _ => input.key(vk, ctrl, hwnd),
+            },
+            Mode::Dialog(d) => match vk {
+                VK_RETURN => {
+                    self.commit_dialog();
+                    true
+                }
+                VK_ESCAPE => {
+                    self.mode = Mode::Normal;
+                    true
+                }
+                _ => d.input.as_mut().is_some_and(|i| i.key(vk, ctrl, hwnd)),
+            },
+            Mode::Conflict(_) => match vk {
+                VK_RETURN => {
+                    self.answer_conflict(Answer::Overwrite);
+                    true
+                }
+                VK_ESCAPE => {
+                    self.answer_conflict(Answer::Cancel);
+                    true
+                }
+                _ => false,
+            },
+            Mode::Normal => self.on_key_normal(vk, ctrl, shift),
         };
         if handled {
             self.invalidate();
@@ -405,13 +748,18 @@ impl App {
         handled
     }
 
-    fn on_key_normal(&mut self, vk: VIRTUAL_KEY, ctrl: bool) -> bool {
+    fn on_key_normal(&mut self, vk: VIRTUAL_KEY, ctrl: bool, shift: bool) -> bool {
         let a = self.active;
         let p = &mut self.panels[a];
         match vk {
             VK_TAB => {
                 p.search.clear();
                 self.active ^= 1;
+            }
+            VK_UP | VK_DOWN if shift => {
+                p.search.clear();
+                p.toggle_mark();
+                p.move_cursor(if vk == VK_UP { -1 } else { 1 });
             }
             VK_UP => {
                 p.search.clear();
@@ -444,12 +792,29 @@ impl App {
                 p.search.clear();
                 self.open_current();
             }
+            VK_INSERT => {
+                p.search.clear();
+                p.toggle_mark();
+                p.move_cursor(1);
+            }
+            VK_A if ctrl => p.mark_all(),
             VK_BACK if !p.search.is_empty() => p.search_pop(),
             VK_BACK => p.go_up(a, &self.sink),
-            VK_ESCAPE => p.search.clear(),
+            VK_ESCAPE => {
+                if !p.search.is_empty() {
+                    p.search.clear();
+                } else if let Some(job) = &self.job {
+                    job.handle.cancel();
+                }
+            }
             VK_F2 => p.reload(a, &self.sink),
             VK_R if ctrl => p.reload(a, &self.sink),
             VK_L if ctrl => self.start_path_edit(a),
+            VK_F5 => self.open_dialog(DialogKind::Copy),
+            VK_F6 if shift => self.open_dialog(DialogKind::Rename),
+            VK_F6 => self.open_dialog(DialogKind::Move),
+            VK_F7 => self.open_dialog(DialogKind::MkDir),
+            VK_F8 | VK_DELETE => self.open_dialog(DialogKind::Delete { recycle: !shift }),
             _ => return false,
         }
         self.arm_timer();
@@ -457,6 +822,9 @@ impl App {
     }
 
     pub fn on_syskey(&mut self, vk: VIRTUAL_KEY) -> bool {
+        if !matches!(self.mode, Mode::Normal | Mode::Drives(_)) {
+            return false;
+        }
         let panel = match vk {
             VK_F1 => 0,
             VK_F2 => 1,
@@ -478,17 +846,29 @@ impl App {
                     self.choose_drive(i);
                 }
             }
-            Mode::PathEdit(e) => {
-                e.text.insert(e.caret, c);
-                e.caret += 1;
+            Mode::PathEdit { input, .. } => input.insert(c),
+            Mode::Dialog(d) => {
+                if let Some(i) = &mut d.input {
+                    i.insert(c);
+                }
             }
+            Mode::Conflict(_) => match char::from_u32(fsx::fold(c)) {
+                Some('s') => self.answer_conflict(Answer::Skip),
+                Some('a') => self.answer_conflict(Answer::OverwriteAll),
+                Some('k') => self.answer_conflict(Answer::SkipAll),
+                _ => {}
+            },
             Mode::Normal => {
                 let a = self.active;
+                let p = &mut self.panels[a];
                 if c == b'\\' as u16 {
-                    self.panels[a].go_root(a, &self.sink);
+                    p.go_root(a, &self.sink);
                     self.arm_timer();
+                } else if c == b' ' as u16 && p.search.is_empty() {
+                    p.toggle_mark();
+                    p.move_cursor(1);
                 } else {
-                    self.panels[a].search_push(c);
+                    p.search_push(c);
                 }
             }
         }
@@ -496,6 +876,9 @@ impl App {
     }
 
     pub fn on_click(&mut self, x: f32, y: f32, double: bool) {
+        if matches!(self.mode, Mode::Dialog(_) | Mode::Conflict(_)) {
+            return;
+        }
         let hit = self.hit(x, y);
         if let Mode::Drives(_) = self.mode {
             match hit {
@@ -505,8 +888,8 @@ impl App {
             self.invalidate();
             return;
         }
-        if let Mode::PathEdit(e) = &self.mode {
-            if matches!(hit, Hit::Path(p) if p == e.panel) {
+        if let Mode::PathEdit { panel, .. } = &self.mode {
+            if matches!(hit, Hit::Path(p) if p == *panel) {
                 return;
             }
             self.mode = Mode::Normal;
@@ -558,18 +941,24 @@ impl App {
             );
         }
         let (w, h) = self.gfx.size_dips(self.hwnd);
-        let caret_x = match &self.mode {
-            Mode::PathEdit(e) => Some(self.gfx.caret_x(&e.text[..e.caret])),
+        let input = match &self.mode {
+            Mode::PathEdit { input, .. } => Some(input),
+            Mode::Dialog(d) => d.input.as_ref(),
             _ => None,
         };
+        let caret_x = input.map(|i| self.gfx.caret_x(&i.text[..i.caret]));
         let Some(c) = self.gfx.begin(self.theme.panel_bg) else { return };
         for i in 0..2 {
             self.draw_panel(&c, i, w, h, caret_x);
         }
         c.fill(rect(self.panel_x(1, w).0 - 1.0, 0.0, 1.0, h - KEYBAR_H), self.theme.divider);
         self.draw_keybar(&c, w, h);
-        if let Mode::Drives(d) = &self.mode {
-            self.draw_drives(&c, d, w);
+        self.draw_job_or_notice(&c, w, h);
+        match &self.mode {
+            Mode::Drives(d) => self.draw_drives(&c, d, w),
+            Mode::Dialog(d) => self.draw_dialog(&c, d, w, h, caret_x),
+            Mode::Conflict(path) => self.draw_conflict(&c, path, w, h),
+            _ => {}
         }
         drop(c);
         self.gfx.end();
@@ -591,10 +980,9 @@ impl App {
     /// Bench: steady-state frame time (cursor moves, everything is redrawn).
     fn bench_frames(&mut self) {
         let n = 60;
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         for i in 0..n {
             self.panels[0].move_cursor(if i % 20 < 10 { 1 } else { -1 });
-            self.painted_content = true;
             let (w, h) = self.gfx.size_dips(self.hwnd);
             let Some(c) = self.gfx.begin(self.theme.panel_bg) else { return };
             for p in 0..2 {
@@ -607,6 +995,139 @@ impl App {
         let (w, h) = self.gfx.size_dips(self.hwnd);
         let ms = start.elapsed().as_secs_f64() * 1000.0 / n as f64;
         self.timing.note(format!("  frame time: {ms:.2} ms (avg over {n} frames, {w:.0}×{h:.0} DIP, {} dpi)", self.gfx.dpi));
+    }
+
+    /// Text input box with caret; scrolls horizontally to keep the caret visible.
+    fn draw_input(&self, c: &Canvas, r: Rect, input: &TextInput, caret_x: f32) {
+        let t = self.theme;
+        c.fill_round(r, 5.0, t.edit_bg);
+        c.stroke_round(r, 5.0, 1.0, t.accent);
+        let inner = rect(r.left + 6.0, r.top, r.right - r.left - 12.0, r.bottom - r.top);
+        let shift = (caret_x - (inner.right - inner.left) + 4.0).max(0.0);
+        c.clip(inner);
+        c.text(&input.text, &c.fonts.name, rect(inner.left - shift, inner.top, 10000.0, inner.bottom - inner.top), t.text);
+        let caret = inner.left - shift + caret_x;
+        c.fill(rect(caret, inner.top + 5.0, 1.5, inner.bottom - inner.top - 10.0), t.accent);
+        c.unclip();
+    }
+
+    /// Row of key chips with labels; returns the x after the last one.
+    fn draw_chips(&self, c: &Canvas, mut x: f32, y: f32, h: f32, chips: &[(&str, &str)]) -> f32 {
+        let t = self.theme;
+        for (key, label) in chips {
+            let kw = self.gfx.measure(&wide(key), &c.fonts.small_center) + 12.0;
+            let lw = self.gfx.measure(&wide(label), &c.fonts.small) + 2.0;
+            let chip = rect(x, y + (h - 18.0) / 2.0, kw, 18.0);
+            c.fill_round(chip, 4.0, t.popup_bg);
+            c.text_str(key, &c.fonts.small_center, chip, t.accent);
+            x += kw + 6.0;
+            c.text_str(label, &c.fonts.small, rect(x, y, lw, h), t.text_dim);
+            x += lw + 16.0;
+        }
+        x
+    }
+
+    fn draw_card(&self, c: &Canvas, r: Rect) {
+        let t = self.theme;
+        let shadow = rect(r.left + 2.0, r.top + 5.0, r.right - r.left, r.bottom - r.top);
+        c.fill_round(shadow, 10.0, crate::theme::rgba(0x000000, 0.4));
+        c.fill_round(r, 10.0, t.popup_bg);
+        c.stroke_round(r, 10.0, 1.0, t.popup_border);
+    }
+
+    fn draw_dialog(&self, c: &Canvas, d: &Dialog, w: f32, h: f32, caret_x: Option<f32>) {
+        let t = self.theme;
+        c.fill(rect(0.0, 0.0, w, h), crate::theme::rgba(0x000000, 0.35));
+        let dw = (w - 48.0).clamp(200.0, 600.0);
+        let input_h = if d.input.is_some() { 44.0 } else { 0.0 };
+        let dh = 20.0 + 28.0 + 26.0 + input_h + 44.0;
+        let r = rect(((w - dw) / 2.0).floor(), ((h - dh) / 2.5).floor(), dw, dh);
+        self.draw_card(c, r);
+        let x = r.left + 20.0;
+        let iw = dw - 40.0;
+        let mut y = r.top + 16.0;
+        let danger = d.kind == DialogKind::Delete { recycle: false };
+        c.text_str(d.kind.title(), &c.fonts.path, rect(x, y, iw, 28.0), if danger { t.error } else { t.text });
+        y += 28.0;
+        c.text_str(&d.message, &c.fonts.name, rect(x, y, iw, 26.0), t.text_dim);
+        y += 30.0;
+        if let (Some(input), Some(cx)) = (&d.input, caret_x) {
+            self.draw_input(c, rect(x, y, iw, 32.0), input, cx);
+            y += input_h;
+        }
+        let ok = if matches!(d.kind, DialogKind::Delete { .. }) { "Löschen" } else { "OK" };
+        self.draw_chips(c, x, y, 28.0, &[("Enter", ok), ("Esc", "Abbrechen")]);
+    }
+
+    fn draw_conflict(&self, c: &Canvas, path: &Path, w: f32, h: f32) {
+        let t = self.theme;
+        c.fill(rect(0.0, 0.0, w, h), crate::theme::rgba(0x000000, 0.35));
+        let dw = (w - 48.0).clamp(200.0, 720.0);
+        let dh = 20.0 + 28.0 + 26.0 + 44.0;
+        let r = rect(((w - dw) / 2.0).floor(), ((h - dh) / 2.5).floor(), dw, dh);
+        self.draw_card(c, r);
+        let x = r.left + 20.0;
+        let iw = dw - 40.0;
+        c.text_str("Ziel existiert bereits", &c.fonts.path, rect(x, r.top + 16.0, iw, 28.0), t.marked);
+        c.text_str(&path.display().to_string(), &c.fonts.name, rect(x, r.top + 44.0, iw, 26.0), t.text_dim);
+        let chips = [
+            ("Enter", "Überschreiben"),
+            ("S", "Überspringen"),
+            ("A", "Alle überschreiben"),
+            ("K", "Keine überschreiben"),
+            ("Esc", "Abbrechen"),
+        ];
+        self.draw_chips(c, x, r.top + 74.0, 28.0, &chips);
+    }
+
+    fn draw_job_or_notice(&self, c: &Canvas, w: f32, h: f32) {
+        let t = self.theme;
+        let cw = CARD_W.min(w - 32.0);
+        let x = w - cw - 16.0;
+        let bottom = h - KEYBAR_H - STATUS_H - 12.0;
+        if let Some(job) = &self.job {
+            if job.started.elapsed().as_millis() < JOB_CARD_DELAY_MS as u128 {
+                return;
+            }
+            let p = &job.progress;
+            let r = rect(x, bottom - 92.0, cw, 92.0);
+            self.draw_card(c, r);
+            let ix = r.left + 16.0;
+            let iw = cw - 32.0;
+            let frac = if p.bytes_total > 0 {
+                p.bytes_done as f64 / p.bytes_total as f64
+            } else if p.files_total > 0 {
+                p.files_done as f64 / p.files_total as f64
+            } else {
+                0.0
+            }
+            .clamp(0.0, 1.0) as f32;
+            c.text_str(&format!("{} …", job.title), &c.fonts.path, rect(ix, r.top + 8.0, iw, 24.0), t.text);
+            c.text_str(&format!("{:.0} %", frac * 100.0), &c.fonts.small_right, rect(ix, r.top + 8.0, iw, 24.0), t.accent);
+            let current = p.current.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            c.text_str(&current, &c.fonts.small, rect(ix, r.top + 32.0, iw, 18.0), t.text_dim);
+            let bar = rect(ix, r.top + 54.0, iw, 6.0);
+            c.fill_round(bar, 3.0, t.edit_bg);
+            if frac > 0.0 {
+                c.fill_round(rect(ix, bar.top, (iw * frac).max(6.0), 6.0), 3.0, t.accent);
+            }
+            let mut stats = format!("{} / {} Dateien", p.files_done, p.files_total);
+            if p.bytes_total > 0 {
+                stats += &format!("  ·  {} / {}", fmt_size(p.bytes_done), fmt_size(p.bytes_total));
+            }
+            c.text_str(&stats, &c.fonts.small, rect(ix, r.top + 64.0, iw, 22.0), t.text_dim);
+            c.text_str("Esc bricht ab", &c.fonts.small_right, rect(ix, r.top + 64.0, iw, 22.0), t.text_hidden);
+        } else if let Some(n) = &self.notice {
+            let r = rect(x, bottom - 40.0, cw, 40.0);
+            self.draw_card(c, r);
+            let (glyph, col) = match n.tone {
+                Tone::Success => (0xE73E, t.success),
+                Tone::Info => (0xE946, t.text_dim),
+                Tone::Error => (0xE783, t.error),
+            };
+            c.text(&[glyph], &c.fonts.icon, rect(r.left + 10.0, r.top, 24.0, 40.0), col);
+            c.text_str(&n.text, &c.fonts.name, rect(r.left + 40.0, r.top, cw - 52.0, 40.0), t.text);
+        }
     }
 
     fn draw_panel(&self, c: &Canvas, i: usize, w: f32, h: f32, caret_x: Option<f32>) {
@@ -631,17 +1152,9 @@ impl App {
         let loading = p.loading_for_ms().is_some_and(|ms| ms >= LOADING_DELAY_MS as u128);
         let right_w = if loading { 70.0 } else { 0.0 };
         match (&self.mode, caret_x) {
-            (Mode::PathEdit(e), Some(cx)) if e.panel == i => {
+            (Mode::PathEdit { panel, input }, Some(cx)) if *panel == i => {
                 let r = rect(path_x - 6.0, 6.0, x + pw - PAD - path_x + 6.0, PATH_H - 14.0);
-                c.fill_round(r, 5.0, t.edit_bg);
-                c.stroke_round(r, 5.0, 1.0, t.accent);
-                let inner = rect(r.left + 6.0, r.top, r.right - r.left - 12.0, r.bottom - r.top);
-                let shift = (cx - (inner.right - inner.left) + 4.0).max(0.0);
-                c.clip(inner);
-                c.text(&e.text, &f.name, rect(inner.left - shift, inner.top, 10000.0, inner.bottom - inner.top), t.text);
-                let caret = inner.left - shift + cx;
-                c.fill(rect(caret, inner.top + 5.0, 1.5, inner.bottom - inner.top - 10.0), t.accent);
-                c.unclip();
+                self.draw_input(c, r, input, cx);
             }
             _ => {
                 let r = rect(path_x, 0.0, x + pw - PAD - path_x - right_w, PATH_H - 2.0);
@@ -683,15 +1196,20 @@ impl App {
                 icol.a = 0.45;
                 tcol = t.text_hidden;
             }
+            if e.marked {
+                tcol = t.marked;
+                c.fill_round(rect(x + 5.0, y + 5.0, 3.0, ROW_H - 10.0), 1.5, t.marked);
+            }
             c.text(&[glyph], &f.icon, rect(x + PAD, y, ICON_W, ROW_H), icol);
             c.text(&e.name, &f.name, rect(name_x, y, size_x - name_x - 8.0, ROW_H), tcol);
+            let dim = if e.marked { t.marked } else { t.text_dim };
             match e.kind {
                 Kind::Parent => {}
-                Kind::Dir => c.text_str("Ordner", &f.small_right, rect(size_x, y, SIZE_W, ROW_H), t.text_dim),
-                _ => c.text_str(&fmt_size(e.size), &f.right, rect(size_x, y, SIZE_W, ROW_H), if e.hidden { tcol } else { t.text_dim }),
+                Kind::Dir => c.text_str("Ordner", &f.small_right, rect(size_x, y, SIZE_W, ROW_H), dim),
+                _ => c.text_str(&fmt_size(e.size), &f.right, rect(size_x, y, SIZE_W, ROW_H), if e.hidden && !e.marked { tcol } else { dim }),
             }
             if e.kind != Kind::Parent {
-                c.text_str(&fmt_date(e.mtime), &f.small, rect(date_x, y, DATE_W, ROW_H), t.text_dim);
+                c.text_str(&fmt_date(e.mtime), &f.small, rect(date_x, y, DATE_W, ROW_H), dim);
             }
         }
         c.unclip();
@@ -719,8 +1237,13 @@ impl App {
             status_w -= tw + 8.0;
         }
         let sr = rect(x + PAD, sy, status_w, STATUS_H);
+        let (marked, marked_bytes) = p.marked();
         match &p.error {
             Some(err) => c.text_str(err, &f.small, sr, t.error),
+            None if marked > 0 => {
+                let s = format!("{marked} markiert  ·  {}", fmt_size(marked_bytes));
+                c.text_str(&s, &f.small, sr, t.marked);
+            }
             None => {
                 let s = format!("{} Ordner  ·  {} Dateien  ·  {}", p.dirs, p.files, fmt_size(p.bytes));
                 c.text_str(&s, &f.small, sr, t.text_dim);
@@ -778,5 +1301,20 @@ impl FirstWide for std::ffi::OsStr {
     fn encode_wide_first(&self) -> Option<u16> {
         use std::os::windows::ffi::OsStrExt;
         self.encode_wide().next()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn names() {
+        assert!(valid_name("neu.txt", false));
+        assert!(!valid_name("a\\b", false));
+        assert!(valid_name("a\\b", true));
+        assert!(!valid_name("", true));
+        assert!(!valid_name("..", false));
+        assert!(!valid_name("x?.txt", false));
     }
 }
