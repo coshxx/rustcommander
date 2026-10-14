@@ -46,7 +46,10 @@ const REFRESH_THROTTLE_MS: u32 = 250;
 
 pub(crate) enum Mode {
     Normal,
-    PathEdit { panel: usize, input: TextInput },
+    PathEdit {
+        panel: usize,
+        input: TextInput,
+    },
     Drives(DrivePopup),
     Dialog(Dialog),
     /// A running job waits for an answer about this existing target.

@@ -45,8 +45,12 @@ pub struct Panel {
 pub enum Applied {
     /// Result of a superseded load; ignored.
     Stale,
-    Ok { dir_changed: bool },
-    Failed { path: PathBuf },
+    Ok {
+        dir_changed: bool,
+    },
+    Failed {
+        path: PathBuf,
+    },
 }
 
 impl Panel {
@@ -54,7 +58,14 @@ impl Panel {
         self.start_load(index, path, select, false, sink);
     }
 
-    fn start_load(&mut self, index: usize, path: PathBuf, select: Option<Box<[u16]>>, keep_cursor: bool, sink: &LoadSink) {
+    fn start_load(
+        &mut self,
+        index: usize,
+        path: PathBuf,
+        select: Option<Box<[u16]>>,
+        keep_cursor: bool,
+        sink: &LoadSink,
+    ) {
         if let Some(p) = self.pending.take() {
             p.cancel.store(true, Ordering::Relaxed);
         }
@@ -135,9 +146,11 @@ impl Panel {
                     }
                 }
                 // Selected entry gone (e.g. deleted)? Stay at the same position.
-                let idx = select
-                    .and_then(|s| self.entries.iter().position(|e| *e.name == *s))
-                    .unwrap_or(if same_dir { old_cursor } else { 0 });
+                let idx = select.and_then(|s| self.entries.iter().position(|e| *e.name == *s)).unwrap_or(if same_dir {
+                    old_cursor
+                } else {
+                    0
+                });
                 if !same_dir {
                     self.top = 0;
                 }
@@ -295,10 +308,8 @@ impl Panel {
     }
 
     fn search_jump(&mut self) -> bool {
-        let hit = self
-            .entries
-            .iter()
-            .position(|e| e.kind != Kind::Parent && starts_with_ignore_case(&e.name, &self.search));
+        let hit =
+            self.entries.iter().position(|e| e.kind != Kind::Parent && starts_with_ignore_case(&e.name, &self.search));
         if let Some(i) = hit {
             self.set_cursor(i);
         }

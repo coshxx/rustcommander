@@ -14,8 +14,8 @@ use windows::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificL
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VIRTUAL_KEY};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    KillTimer, PostMessageW, SPI_GETKEYBOARDDELAY, SW_SHOWNORMAL,
-    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetTimer, SystemParametersInfoW,
+    KillTimer, PostMessageW, SPI_GETKEYBOARDDELAY, SW_SHOWNORMAL, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetTimer,
+    SystemParametersInfoW,
 };
 use windows::core::{PCWSTR, w};
 

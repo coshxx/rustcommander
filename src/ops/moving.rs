@@ -7,8 +7,8 @@ use windows::Win32::Foundation::ERROR_NOT_SAME_DEVICE;
 use windows::Win32::Storage::FileSystem::{MOVE_FILE_FLAGS, MOVEFILE_REPLACE_EXISTING, MoveFileExW};
 use windows::core::PCWSTR;
 
-use crate::files::names::to_utf16_nul;
 use super::{Cancelled, MAX_DEPTH, Worker, clear_readonly, error_text, is_reparse, scan};
+use crate::files::names::to_utf16_nul;
 
 impl Worker {
     pub(super) fn move_item(&mut self, src: &Path, dst: &Path, fast: bool) -> Result<(), Cancelled> {

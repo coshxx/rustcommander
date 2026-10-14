@@ -4,13 +4,12 @@ use std::path::{Path, PathBuf};
 
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::Win32::UI::Shell::{
-    FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_WANTNUKEWARNING,
-    SHFILEOPSTRUCTW, SHFileOperationW,
+    FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_WANTNUKEWARNING, SHFILEOPSTRUCTW, SHFileOperationW,
 };
 use windows::core::PCWSTR;
 
-use crate::files::names::to_utf16_nul;
 use super::{Cancelled, MAX_DEPTH, Worker, clear_readonly, error_text, is_reparse};
+use crate::files::names::to_utf16_nul;
 
 fn count_no_follow(path: &Path, depth: usize, files: &mut u64) {
     let Ok(m) = std::fs::symlink_metadata(path) else { return };

@@ -89,7 +89,12 @@ impl App {
             }
             .clamp(0.0, 1.0) as f32;
             c.text_str(&format!("{} …", job.title), &c.fonts.path, rect(ix, r.top + 8.0, iw, 24.0), t.text);
-            c.text_str(&format!("{:.0} %", frac * 100.0), &c.fonts.small_right, rect(ix, r.top + 8.0, iw, 24.0), t.accent);
+            c.text_str(
+                &format!("{:.0} %", frac * 100.0),
+                &c.fonts.small_right,
+                rect(ix, r.top + 8.0, iw, 24.0),
+                t.accent,
+            );
             let current = p.current.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             c.text_str(&current, &c.fonts.small, rect(ix, r.top + 32.0, iw, 18.0), t.text_dim);
             let bar = rect(ix, r.top + 54.0, iw, 6.0);

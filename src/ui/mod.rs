@@ -90,6 +90,7 @@ impl App {
         }
         let (w, h) = self.gfx.size_dips(self.hwnd);
         let ms = start.elapsed().as_secs_f64() * 1000.0 / n as f64;
-        self.timing.note(format!("  frame time: {ms:.2} ms (avg over {n} frames, {w:.0}×{h:.0} DIP, {} dpi)", self.gfx.dpi));
+        self.timing
+            .note(format!("  frame time: {ms:.2} ms (avg over {n} frames, {w:.0}×{h:.0} DIP, {} dpi)", self.gfx.dpi));
     }
 }

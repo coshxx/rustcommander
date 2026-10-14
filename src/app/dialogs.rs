@@ -22,11 +22,15 @@ pub(crate) struct DrivePopup {
 pub(crate) enum DialogKind {
     Copy,
     Move,
-    Delete { recycle: bool },
+    Delete {
+        recycle: bool,
+    },
     Rename,
     MkDir,
     /// Mark (`add`) or unmark entries by file mask.
-    Select { add: bool },
+    Select {
+        add: bool,
+    },
 }
 
 impl DialogKind {

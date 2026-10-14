@@ -58,11 +58,7 @@ impl Timing {
         }
         if let Some(dir) = crate::config::dir() {
             let _ = std::fs::create_dir_all(&dir);
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(dir.join("timing.log"))
-            {
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("timing.log")) {
                 let _ = writeln!(f, "--- run ---");
                 for l in self.log.drain(..) {
                     let _ = writeln!(f, "{l}");

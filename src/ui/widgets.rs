@@ -33,7 +33,12 @@ impl App {
             let sel = rect(inner.left - shift - 1.0, inner.top + 5.0, tw + 2.0, inner.bottom - inner.top - 10.0);
             c.fill_round(sel, 2.0, t.cursor_active);
         }
-        c.text(&input.text, &c.fonts.name, rect(inner.left - shift, inner.top, 10000.0, inner.bottom - inner.top), t.text);
+        c.text(
+            &input.text,
+            &c.fonts.name,
+            rect(inner.left - shift, inner.top, 10000.0, inner.bottom - inner.top),
+            t.text,
+        );
         let caret = inner.left - shift + caret_x;
         c.fill(rect(caret, inner.top + 5.0, 1.5, inner.bottom - inner.top - 10.0), t.accent);
         c.unclip();

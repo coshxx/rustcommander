@@ -1,9 +1,7 @@
 //! Drawing one panel: path bar, column headers, file rows, scrollbar, status bar.
 
 use crate::app::format::{format_date, format_size};
-use crate::app::layout::{
-    CHIP_W, COLS_H, DATE_W, ICON_W, KEYBAR_H, PAD, PATH_H, ROW_H, SIZE_W, STATUS_H,
-};
+use crate::app::layout::{CHIP_W, COLS_H, DATE_W, ICON_W, KEYBAR_H, PAD, PATH_H, ROW_H, SIZE_W, STATUS_H};
 use crate::app::mouse::Drag;
 use crate::app::{App, LOADING_DELAY_MS, Mode};
 use crate::files::listing::Kind;
@@ -58,7 +56,12 @@ impl App {
                 let s = s.get(2..).filter(|_| drive.ends_with(':')).unwrap_or(&s);
                 c.text_str(s, &f.path, r, if active { t.text } else { t.text_dim });
                 if loading {
-                    c.text_str("lädt …", &f.small_right, rect(x + pw - PAD - right_w, 0.0, right_w, PATH_H - 2.0), t.accent);
+                    c.text_str(
+                        "lädt …",
+                        &f.small_right,
+                        rect(x + pw - PAD - right_w, 0.0, right_w, PATH_H - 2.0),
+                        t.accent,
+                    );
                 }
             }
         }
@@ -102,7 +105,12 @@ impl App {
             match e.kind {
                 Kind::Parent => {}
                 Kind::Dir => c.text_str("Ordner", &f.small_right, rect(size_x, y, SIZE_W, ROW_H), dim),
-                _ => c.text_str(&format_size(e.size), &f.right, rect(size_x, y, SIZE_W, ROW_H), if e.hidden && !e.marked { tcol } else { dim }),
+                _ => c.text_str(
+                    &format_size(e.size),
+                    &f.right,
+                    rect(size_x, y, SIZE_W, ROW_H),
+                    if e.hidden && !e.marked { tcol } else { dim },
+                ),
             }
             if e.kind != Kind::Parent {
                 c.text_str(&format_date(e.mtime), &f.small, rect(date_x, y, DATE_W, ROW_H), dim);

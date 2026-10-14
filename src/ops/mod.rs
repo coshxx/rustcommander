@@ -270,11 +270,7 @@ impl Worker {
     /// Where `src` ends up: into `dest` if it is a directory (or several sources),
     /// otherwise exactly at `dest` (copy/move with a new name).
     fn target_for(src: &Path, dest: &Path, into: bool) -> Option<PathBuf> {
-        if into || dest.is_dir() {
-            src.file_name().map(|n| dest.join(n))
-        } else {
-            Some(dest.to_path_buf())
-        }
+        if into || dest.is_dir() { src.file_name().map(|n| dest.join(n)) } else { Some(dest.to_path_buf()) }
     }
 
     fn transfer(&mut self, sources: &[PathBuf], dest: &Path, is_move: bool) -> Result<(), Cancelled> {

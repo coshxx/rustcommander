@@ -6,13 +6,13 @@ use std::sync::atomic::Ordering;
 
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Storage::FileSystem::{
-    COPYFILE_FLAGS, COPYPROGRESSROUTINE_PROGRESS, CopyFileExW, LPPROGRESS_ROUTINE_CALLBACK_REASON,
-    PROGRESS_CANCEL, PROGRESS_CONTINUE,
+    COPYFILE_FLAGS, COPYPROGRESSROUTINE_PROGRESS, CopyFileExW, LPPROGRESS_ROUTINE_CALLBACK_REASON, PROGRESS_CANCEL,
+    PROGRESS_CONTINUE,
 };
 use windows::core::PCWSTR;
 
-use crate::files::names::to_utf16_nul;
 use super::{Cancelled, MAX_DEPTH, Worker, clear_readonly, error_text};
+use crate::files::names::to_utf16_nul;
 
 struct CopyCtx<'a> {
     worker: &'a mut Worker,

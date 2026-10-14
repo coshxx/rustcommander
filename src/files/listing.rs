@@ -8,9 +8,9 @@ use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::time::{Duration, Instant};
 
 use windows::Win32::Storage::FileSystem::{
-    FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_SYSTEM,
-    FIND_FIRST_EX_LARGE_FETCH, FindClose, FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW,
-    FindNextFileW, GetFileAttributesW, INVALID_FILE_ATTRIBUTES, WIN32_FIND_DATAW,
+    FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_SYSTEM, FIND_FIRST_EX_LARGE_FETCH, FindClose,
+    FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, FindNextFileW, GetFileAttributesW,
+    INVALID_FILE_ATTRIBUTES, WIN32_FIND_DATAW,
 };
 use windows::core::PCWSTR;
 
@@ -106,19 +106,19 @@ fn kind_from_extension(name: &[u16]) -> Kind {
         buf[i] = (c as u8).to_ascii_lowercase();
     }
     match &buf[..ext.len()] {
-        b"png" | b"jpg" | b"jpeg" | b"gif" | b"bmp" | b"webp" | b"svg" | b"ico" | b"tif"
-        | b"tiff" | b"heic" | b"avif" | b"psd" | b"raw" => Kind::Image,
+        b"png" | b"jpg" | b"jpeg" | b"gif" | b"bmp" | b"webp" | b"svg" | b"ico" | b"tif" | b"tiff" | b"heic"
+        | b"avif" | b"psd" | b"raw" => Kind::Image,
         b"mp3" | b"wav" | b"flac" | b"ogg" | b"m4a" | b"aac" | b"wma" | b"opus" => Kind::Audio,
         b"mp4" | b"mkv" | b"avi" | b"mov" | b"wmv" | b"webm" | b"m4v" | b"flv" => Kind::Video,
-        b"zip" | b"7z" | b"rar" | b"tar" | b"gz" | b"bz2" | b"xz" | b"zst" | b"cab" | b"iso"
-        | b"tgz" => Kind::Archive,
-        b"rs" | b"c" | b"h" | b"cpp" | b"hpp" | b"cc" | b"cs" | b"js" | b"ts" | b"tsx"
-        | b"jsx" | b"py" | b"go" | b"java" | b"kt" | b"json" | b"toml" | b"yaml" | b"yml"
-        | b"xml" | b"html" | b"css" | b"scss" | b"sh" | b"ps1" | b"lua" | b"sql" | b"rb"
-        | b"php" | b"swift" | b"zig" | b"vue" | b"ini" | b"cfg" | b"lock" => Kind::Code,
+        b"zip" | b"7z" | b"rar" | b"tar" | b"gz" | b"bz2" | b"xz" | b"zst" | b"cab" | b"iso" | b"tgz" => Kind::Archive,
+        b"rs" | b"c" | b"h" | b"cpp" | b"hpp" | b"cc" | b"cs" | b"js" | b"ts" | b"tsx" | b"jsx" | b"py" | b"go"
+        | b"java" | b"kt" | b"json" | b"toml" | b"yaml" | b"yml" | b"xml" | b"html" | b"css" | b"scss" | b"sh"
+        | b"ps1" | b"lua" | b"sql" | b"rb" | b"php" | b"swift" | b"zig" | b"vue" | b"ini" | b"cfg" | b"lock" => {
+            Kind::Code
+        }
         b"exe" | b"msi" | b"bat" | b"cmd" | b"com" | b"lnk" | b"dll" | b"sys" => Kind::Exe,
-        b"txt" | b"md" | b"pdf" | b"doc" | b"docx" | b"xls" | b"xlsx" | b"ppt" | b"pptx"
-        | b"odt" | b"ods" | b"rtf" | b"csv" | b"log" | b"epub" => Kind::Doc,
+        b"txt" | b"md" | b"pdf" | b"doc" | b"docx" | b"xls" | b"xlsx" | b"ppt" | b"pptx" | b"odt" | b"ods" | b"rtf"
+        | b"csv" | b"log" | b"epub" => Kind::Doc,
         _ => Kind::File,
     }
 }
@@ -186,8 +186,7 @@ pub fn load(path: &Path, cancel: &AtomicBool) -> Result<Listing, String> {
                 kind: if is_dir { Kind::Dir } else { kind_from_extension(name) },
                 hidden: a & (FILE_ATTRIBUTE_HIDDEN.0 | FILE_ATTRIBUTE_SYSTEM.0) != 0,
                 size: if is_dir { 0 } else { size },
-                mtime: ((data.ftLastWriteTime.dwHighDateTime as u64) << 32)
-                    | data.ftLastWriteTime.dwLowDateTime as u64,
+                mtime: ((data.ftLastWriteTime.dwHighDateTime as u64) << 32) | data.ftLastWriteTime.dwLowDateTime as u64,
                 marked: false,
             });
         }
@@ -199,9 +198,7 @@ pub fn load(path: &Path, cancel: &AtomicBool) -> Result<Listing, String> {
         let _ = FindClose(handle);
     }
 
-    entries.sort_unstable_by(|a, b| {
-        b.is_dir().cmp(&a.is_dir()).then_with(|| natural_cmp(&a.name, &b.name))
-    });
+    entries.sort_unstable_by(|a, b| b.is_dir().cmp(&a.is_dir()).then_with(|| natural_cmp(&a.name, &b.name)));
     if dir.parent().is_some() {
         entries.insert(0, Entry::parent());
     }
