@@ -170,10 +170,14 @@ impl App {
                     p.search.clear();
                 } else if let Some(job) = &self.job {
                     job.handle.cancel();
+                } else {
+                    for p in &mut self.panels {
+                        p.cancel_sizes();
+                    }
                 }
             }
-            VK_F2 => p.reload(a, &self.sink),
-            VK_R if ctrl => p.reload(a, &self.sink),
+            VK_F2 => self.reload_by_hand(),
+            VK_R if ctrl => self.reload_by_hand(),
             VK_L if ctrl => self.start_path_edit(a),
             VK_F3 => self.view_current(),
             VK_F5 => self.open_dialog(DialogKind::Copy),
@@ -186,10 +190,16 @@ impl App {
         true
     }
 
-    /// Alt+F1 / Alt+F2: drive popup for the left / right panel.
+    /// Alt+F1 / Alt+F2: drive popup for the left / right panel; Alt+Shift+Enter: count the
+    /// size of every folder.
     pub fn on_syskey(&mut self, vk: VIRTUAL_KEY) -> bool {
         if !matches!(self.mode, Mode::Normal | Mode::Drives(_)) {
             return false;
+        }
+        if vk == VK_RETURN && matches!(self.mode, Mode::Normal) && win::key_down(VK_SHIFT) {
+            self.count_all_sizes();
+            self.invalidate();
+            return true;
         }
         let panel = match vk {
             VK_F1 => 0,
@@ -235,8 +245,7 @@ impl App {
                     p.go_root(a, &self.sink);
                     self.arm_loading_indicator();
                 } else if c == b' ' as u16 && p.search.is_empty() {
-                    p.toggle_mark();
-                    p.move_cursor(1);
+                    self.space();
                 } else {
                     p.search_push(c);
                 }

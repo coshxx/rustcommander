@@ -1,18 +1,22 @@
 //! State of one file list: directory, entries, cursor, scroll position, quick search.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::time::Instant;
 
+use crate::files::archive;
+use crate::files::dirsize::{self, DirSize};
 use crate::files::listing::{self, Entry, Kind, Listing, Loaded, Pending};
 use crate::files::names::{starts_with_ignore_case, to_utf16_nul};
 use crate::files::watch::Watcher;
 use crate::sys::win::SendHwnd;
 
 pub const WM_APP_LOADED: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 1;
+/// Posted when a folder size has been counted.
+pub const WM_APP_SIZE: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 5;
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -41,6 +45,9 @@ pub struct Panel {
     pub watcher: Option<Watcher>,
     /// The archive file if `dir` is inside one; such panels are read-only.
     pub archive: Option<PathBuf>,
+    /// Folder sizes counted with Space / Alt+Shift+Enter, by folder name. Kept across automatic
+    /// refreshes, dropped when leaving the directory or reloading by hand.
+    pub sizes: HashMap<Box<[u16]>, Arc<DirSize>>,
 }
 
 /// Outcome of `Panel::apply`.
@@ -58,6 +65,9 @@ pub enum Applied {
 impl Panel {
     /// Load `path` in the background; `select` = entry to put the cursor on.
     pub fn navigate(&mut self, index: usize, path: PathBuf, select: Option<Box<[u16]>>, sink: &LoadSink) {
+        if path != self.dir {
+            self.clear_sizes();
+        }
         self.start_load(index, path, select, false, sink);
     }
 
@@ -146,6 +156,18 @@ impl Panel {
                 self.bytes = l.bytes;
                 self.archive = l.archive;
                 self.error = None;
+                if same_dir {
+                    let names: HashSet<&[u16]> = self.entries.iter().filter(|e| e.is_dir()).map(|e| &*e.name).collect();
+                    self.sizes.retain(|name, size| {
+                        let keep = names.contains(&**name);
+                        if !keep {
+                            size.cancel();
+                        }
+                        keep
+                    });
+                } else {
+                    self.clear_sizes();
+                }
                 if !marked.is_empty() {
                     for e in &mut self.entries {
                         e.marked = marked.contains(&e.name);
@@ -229,9 +251,67 @@ impl Panel {
         }
     }
 
-    /// Number of marked entries and the total size of the marked files.
+    /// Number of marked entries and their total size (folders only once counted).
     pub fn marked(&self) -> (usize, u64) {
-        self.entries.iter().filter(|e| e.marked).fold((0, 0), |(n, b), e| (n + 1, b + e.size))
+        let size = |e: &Entry| self.size_of(e).map_or(e.size, DirSize::bytes);
+        self.entries.iter().filter(|e| e.marked).fold((0, 0), |(n, b), e| (n + 1, b + size(e)))
+    }
+
+    // ---------- folder sizes ----------
+
+    /// The counted (or being counted) size of a folder entry.
+    pub fn size_of(&self, e: &Entry) -> Option<&DirSize> {
+        if e.kind != Kind::Dir {
+            return None;
+        }
+        self.sizes.get(&e.name).map(|s| &**s)
+    }
+
+    /// Start counting the size of folder entry `i`, unless known already. `true` if started.
+    pub fn count_size(&mut self, i: usize, sink: &LoadSink) -> bool {
+        let Some(e) = self.entries.get(i).filter(|e| e.kind == Kind::Dir) else { return false };
+        if self.sizes.contains_key(&e.name) {
+            return false;
+        }
+        let path = self.dir.join(e.os_name());
+        let notify = (sink.hwnd, WM_APP_SIZE);
+        let size = match self.archive.as_ref().and_then(|_| archive::split(&path)) {
+            Some((file, inner)) => dirsize::start_in_archive(file, inner, notify),
+            None => dirsize::start(&path, notify),
+        };
+        self.sizes.insert(e.name.clone(), size);
+        true
+    }
+
+    /// Start counting every folder not counted yet.
+    pub fn count_all_sizes(&mut self, sink: &LoadSink) {
+        for i in 0..self.entries.len() {
+            self.count_size(i, sink);
+        }
+    }
+
+    pub fn sizes_running(&self) -> bool {
+        self.sizes.values().any(|s| !s.done())
+    }
+
+    /// Stop the counts still running and forget them; `true` if there were any.
+    pub fn cancel_sizes(&mut self) -> bool {
+        let before = self.sizes.len();
+        self.sizes.retain(|_, s| {
+            let done = s.done();
+            if !done {
+                s.cancel();
+            }
+            done
+        });
+        self.sizes.len() != before
+    }
+
+    pub fn clear_sizes(&mut self) {
+        for s in self.sizes.values() {
+            s.cancel();
+        }
+        self.sizes.clear();
     }
 
     /// What an operation acts on: the marked entries, or else the entry under the cursor.

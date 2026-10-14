@@ -8,6 +8,7 @@ pub(crate) mod jobs;
 mod keyboard;
 pub(crate) mod layout;
 pub(crate) mod mouse;
+mod sizes;
 pub(crate) mod text_input;
 
 use std::path::{Path, PathBuf};
@@ -46,6 +47,8 @@ const TIMER_NOTICE: usize = 4;
 pub(crate) const TIMER_JOB: usize = 5;
 /// Auto-repeat while a mouse button is held (track paging, drag-marking at the edges).
 pub(crate) const TIMER_DRAG: usize = 6;
+/// Repaint while folder sizes are being counted.
+const TIMER_SIZES: usize = 7;
 
 /// Directory change notifications trigger at most one reload per this interval.
 const REFRESH_THROTTLE_MS: u32 = 250;
@@ -183,6 +186,13 @@ impl App {
         win::set_timer(self.hwnd, TIMER_LOADING, LOADING_DELAY_MS + 10);
     }
 
+    /// F2 / Ctrl+R: reload the active panel; counted folder sizes are dropped.
+    pub(crate) fn reload_by_hand(&mut self) {
+        let a = self.active;
+        self.panels[a].clear_sizes();
+        self.panels[a].reload(a, &self.sink);
+    }
+
     /// Request a repaint.
     pub(crate) fn invalidate(&self) {
         win::invalidate(self.hwnd);
@@ -256,6 +266,7 @@ impl App {
                 self.drag_timer_armed = false;
                 self.drag_tick();
             }
+            TIMER_SIZES => self.arm_sizes_timer(),
             _ if TIMER_REFRESH.contains(&id) => {
                 let i = if id == TIMER_REFRESH[0] { 0 } else { 1 };
                 self.refresh_armed[i] = false;

@@ -194,6 +194,12 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
             app.on_char(wp.0 as u16);
             true
         })),
+        // Alt+Shift+Enter would beep otherwise (no menu to handle the character).
+        WM_SYSCHAR if wp.0 == 0x0D => LRESULT(0),
+        panel::WM_APP_SIZE => {
+            cell.with(|app| app.on_size_done());
+            LRESULT(0)
+        }
         panel::WM_APP_LOADED => {
             cell.with(|app| app.on_loaded());
             LRESULT(0)

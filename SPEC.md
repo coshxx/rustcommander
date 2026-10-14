@@ -24,7 +24,7 @@ the steady-state frame time).
 - **Direct2D in software mode** (default). Measured: the hardware render target costs ~150 ms at
   startup (loading D3D + GPU driver) and doesn't draw faster. `RC_HARDWARE=1` switches for comparison.
 - `unsafe` lives only in the OS boundary modules (`main.rs`, `window.rs`, `sys/`, `files/listing.rs`,
-  `files/watch.rs`, `ops/`, `timing.rs`, `lister/window.rs`). App logic (`app/`, `ui/`, `panel.rs`) is free of `unsafe`.
+  `files/dirsize.rs`, `files/watch.rs`, `ops/`, `timing.rs`, `lister/window.rs`). App logic (`app/`, `ui/`, `panel.rs`) is free of `unsafe`.
   The window procedure guards the app against reentrant access (`AppCell`).
 - Code structure: see [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -64,6 +64,8 @@ the steady-state frame time).
 | Ctrl+R, F2 | Reload |
 | Type letters | Quick search (jumps to first match), Esc cancels |
 | Insert, Space | Toggle mark and move down (Space only when no quick search is active) |
+| Space on a folder | Also counts the folder's size, shown in the size column (see below) |
+| Alt+Shift+Enter | Count the size of every folder in the pane |
 | Shift+↑ / Shift+↓ | Toggle mark and move |
 | Ctrl+A | Mark all / unmark all |
 | Num+ / Num− | Mark / unmark by file mask (small dialog, last mask preselected) |
@@ -75,6 +77,7 @@ the steady-state frame time).
 | F8, Del | Move to recycle bin (with confirmation) |
 | Shift+F8, Shift+Del | Delete permanently (with confirmation) |
 | Esc (while a job runs) | Cancel the job |
+| Esc (otherwise) | Cancel running folder size counts |
 
 ### Mouse
 
@@ -90,6 +93,22 @@ Auto-refresh keeps the scroll position as well; only navigation scrolls to the c
 
 On startup the last directories and the window position are restored
 (`%APPDATA%\RustCommander\config.ini`).
+
+### Folder sizes (Space, Alt+Shift+Enter)
+
+- Counted in the background by a shared pool of worker threads (one per core, 2–16) that take
+  directories from one stack, so wide trees use every core and several folders can be counted at
+  once. Each directory is read with `FindFirstFileExW` (`FindExInfoBasic`, large fetch); the
+  sizes come with the listing, no file is opened.
+- Logical file size (like Explorer's "Size"). Directory links (junctions, directory symlinks) are
+  not followed; other reparse points (OneDrive placeholders …) are ordinary folders.
+- The number grows live (repainted every 100 ms, accent color) and turns into the normal color
+  when done. `≥ 1,2 GB` means something could not be read (access denied).
+- Counted sizes go into the "N markiert · size" sum of the status bar.
+- They stay across automatic refreshes and are dropped when leaving the directory or reloading
+  with F2 / Ctrl+R. No re-sorting.
+- Inside archives the size comes from the table of contents.
+- Measured (warm cache, 16 threads): `C:\Windows` (45 GB) in 1.6 s; single-threaded 7.7 s.
 
 ### File masks (Num+ / Num−)
 

@@ -150,7 +150,14 @@ impl App {
         let size_rect = rect(cols.size_x, y, SIZE_W, ROW_H);
         match e.kind {
             Kind::Parent => {}
-            Kind::Dir => c.text_str("Ordner", &f.small_right, size_rect, dim),
+            Kind::Dir => match a.panel.size_of(e) {
+                Some(s) => {
+                    let text = format_size(s.bytes());
+                    let text = if s.incomplete() { format!("≥ {text}") } else { text };
+                    c.text_str(&text, &f.right, size_rect, if s.done() { dim } else { t.accent });
+                }
+                None => c.text_str("Ordner", &f.small_right, size_rect, dim),
+            },
             _ => c.text_str(&format_size(e.size), &f.right, size_rect, if e.hidden && !e.marked { tcol } else { dim }),
         }
         if e.kind != Kind::Parent {

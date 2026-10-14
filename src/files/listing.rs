@@ -79,7 +79,13 @@ pub struct Listing {
 /// Long paths get the `\\?\` prefix so MAX_PATH doesn't apply.
 fn long_path(path: &Path) -> Vec<u16> {
     let w: Vec<u16> = path.as_os_str().encode_wide().collect();
-    if w.len() < 240 || w.starts_with(&[b'\\' as u16, b'\\' as u16, b'?' as u16]) {
+    if w.len() < 240 { w } else { extended_path(path) }
+}
+
+/// The path with the `\\?\` prefix (`\\?\UNC\` for network paths): no MAX_PATH limit.
+pub(crate) fn extended_path(path: &Path) -> Vec<u16> {
+    let w: Vec<u16> = path.as_os_str().encode_wide().collect();
+    if w.starts_with(&[b'\\' as u16, b'\\' as u16, b'?' as u16]) {
         return w;
     }
     let mut out: Vec<u16>;

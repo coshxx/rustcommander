@@ -34,7 +34,7 @@ thread touches.
 | `app/format.rs` | Pure helpers: size/date formatting, name checks, path parsing. |
 | `ui/` | Drawing only – reads `App`, never changes it. `paint()` redraws the whole window. |
 | `panel.rs` | One file list: directory, entries, cursor, scroll position, marks, quick search. |
-| `files/` | Files, but not operations on them: listing directories (`listing`), archives as read-only directories (`archive`), UTF-16 names and natural sort (`names`), marking masks (`mask`), change notifications (`watch`), temp files for opening entries of archives (`temp`). |
+| `files/` | Files, but not operations on them: listing directories (`listing`), folder sizes (`dirsize`), archives as read-only directories (`archive`), UTF-16 names and natural sort (`names`), marking masks (`mask`), change notifications (`watch`), temp files for opening entries of archives (`temp`). |
 | `ops/` | File operations on a worker thread: `copy`, `moving`, `delete`, `extract` (from archives); `mod.rs` holds the public API (`Job`, `Handle`, `Event`) and the shared worker logic. |
 | `lister/` | The F3 viewer: its own windows (`window`), state and commands (`mod.rs`), input, drawing, the byte → screen line logic (`text`, pure and tested) and the search (`search`). |
 | `sys/` | Thin safe wrappers around Win32 (`win`), Direct2D/DirectWrite (`gfx`), libarchive from Windows' `archiveint.dll` (`libarchive`) and memory-mapped files (`mapped`). |
@@ -50,6 +50,7 @@ thread touches.
 | Directory loader (one per load) | `Panel::navigate` / `reload` | `WM_APP_LOADED` + channel | `App::on_loaded` → `Panel::apply` |
 | File operation worker | `App::start_job` → `ops::start` | `WM_APP_JOB` + channel | `App::on_job_event` |
 | Directory watcher (one per panel) | `App::on_loaded` | `WM_APP_DIRCHANGED` (wParam = panel) | `App::on_dir_changed` → throttled reload |
+| Folder size workers (a pool, started on first use) | `Panel::count_size` → `dirsize::start` | `WM_APP_SIZE` when a count is done; live numbers are atomics, repainted by `TIMER_SIZES` | `App::on_size_done` |
 | Shell open | `win::shell_open` | – | – |
 | Temp cleanup (once) | `main` (`files::temp::sweep_old`) | – | – |
 | Lister search (one per search) | `Lister::search` → `search::start` | `WM_APP_SEARCH` (to the lister window) + channel | `Lister::on_search_event` |
@@ -91,7 +92,7 @@ rows are drawn, which keeps a frame at a few milliseconds.
 ## Rules
 
 - **`unsafe`** only in the OS boundary: `main.rs`, `window.rs`, `sys/`, `files/listing.rs`,
-  `files/watch.rs`, `ops/`, `timing.rs`, `lister/window.rs`. `app/`, `ui/` and `panel.rs` call safe wrappers.
+  `files/dirsize.rs`, `files/watch.rs`, `ops/`, `timing.rs`, `lister/window.rs`. `app/`, `ui/` and `panel.rs` call safe wrappers.
 - **Reentrancy:** Win32 sometimes calls `wndproc` again while a handler is still running.
   `AppCell` detects that instead of creating a second `&mut App`. Calls that send messages
   synchronously (`SetWindowPos`, `DestroyWindow`, `SetCapture`, …) are made outside of
