@@ -37,8 +37,10 @@ pub struct Panel {
     pub dirs: usize,
     pub files: usize,
     pub bytes: u64,
-    /// Watches `dir` for changes; replaced whenever `dir` changes.
+    /// Watches `dir` (or the directory holding the archive) for changes.
     pub watcher: Option<Watcher>,
+    /// The archive file if `dir` is inside one; such panels are read-only.
+    pub archive: Option<PathBuf>,
 }
 
 /// Outcome of `Panel::apply`.
@@ -142,6 +144,7 @@ impl Panel {
                 self.dirs = l.dirs;
                 self.files = l.files;
                 self.bytes = l.bytes;
+                self.archive = l.archive;
                 self.error = None;
                 if !marked.is_empty() {
                     for e in &mut self.entries {
@@ -247,10 +250,6 @@ impl Panel {
     /// Entry under the cursor.
     pub fn current(&self) -> Option<&Entry> {
         self.entries.get(self.cursor)
-    }
-
-    pub fn current_path(&self) -> Option<PathBuf> {
-        self.current().map(|e| self.dir.join(e.os_name()))
     }
 
     /// Put the cursor on entry `i` (clamped) and scroll it into view.

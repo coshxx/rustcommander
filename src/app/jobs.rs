@@ -1,10 +1,12 @@
 //! Running file operations (`crate::ops`) from the UI: start a job, follow its
 //! progress, answer conflicts and report the result.
 
+use std::path::PathBuf;
 use std::time::Instant;
 
 use crate::app::{App, Mode, TIMER_JOB, Tone, WM_APP_JOB};
 use crate::files::names::to_utf16_nul;
+use crate::files::temp;
 use crate::ops::{self, Answer, Job};
 use crate::sys::win::{self, SendHwnd};
 
@@ -17,6 +19,8 @@ pub(crate) struct RunningJob {
     pub(crate) progress: ops::Progress,
     source_panel: usize,
     pub(crate) started: Instant,
+    /// Extracting a file from an archive to open it: open the result instead of reporting.
+    open_when_done: bool,
 }
 
 impl App {
@@ -29,9 +33,28 @@ impl App {
             progress: ops::Progress::default(),
             source_panel,
             started: Instant::now(),
+            open_when_done: false,
         });
         self.notice = None;
         win::set_timer(self.hwnd, TIMER_JOB, JOB_CARD_DELAY_MS + 10);
+    }
+
+    /// Enter on a file inside an archive: extract it to a temp directory, then open it with its
+    /// default program.
+    pub(crate) fn open_from_archive(&mut self, panel: usize, path: PathBuf) {
+        if self.job.is_some() {
+            self.notify("Es läuft bereits ein Vorgang".into(), Tone::Error);
+            return;
+        }
+        match temp::new_dir() {
+            Ok(dir) => {
+                self.start_job(Job::Extract { sources: vec![path], dest: dir }, "Öffnen", panel);
+                if let Some(job) = &mut self.job {
+                    job.open_when_done = true;
+                }
+            }
+            Err(e) => self.notify(format!("Temp-Ordner: {e}"), Tone::Error),
+        }
     }
 
     /// `WM_APP_JOB`: process everything the worker sent.
@@ -56,6 +79,14 @@ impl App {
     fn finish_job(&mut self, job: RunningJob, s: ops::Summary) {
         if matches!(self.mode, Mode::Conflict(_)) {
             self.mode = Mode::Normal;
+        }
+        if job.open_when_done
+            && s.errors.is_empty()
+            && !s.cancelled
+            && let Some(file) = s.select
+        {
+            win::shell_open(file);
+            return;
         }
         let (text, tone) = if let Some(first) = s.errors.first() {
             let more = if s.errors.len() > 1 { format!(" (+{} weitere)", s.errors.len() - 1) } else { String::new() };

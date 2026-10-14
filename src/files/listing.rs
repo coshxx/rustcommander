@@ -14,6 +14,7 @@ use windows::Win32::Storage::FileSystem::{
 };
 use windows::core::PCWSTR;
 
+use crate::files::archive;
 use crate::files::names::{natural_cmp, to_utf16_nul};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -71,6 +72,8 @@ pub struct Listing {
     pub files: usize,
     pub bytes: u64,
     pub elapsed: Duration,
+    /// The archive file, if `dir` lies inside one (archives are read-only).
+    pub archive: Option<PathBuf>,
 }
 
 /// Long paths get the `\\?\` prefix so MAX_PATH doesn't apply.
@@ -90,7 +93,7 @@ fn long_path(path: &Path) -> Vec<u16> {
     out
 }
 
-fn kind_from_extension(name: &[u16]) -> Kind {
+pub(crate) fn kind_from_extension(name: &[u16]) -> Kind {
     let Some(dot) = name.iter().rposition(|&c| c == b'.' as u16) else {
         return Kind::File;
     };
@@ -163,9 +166,12 @@ fn entry_from(data: &WIN32_FIND_DATAW) -> Option<Entry> {
     })
 }
 
-/// List and sort a directory. If `path` is a file, its directory is loaded instead and the
-/// file gets selected. Runs on a loader thread; `cancel` aborts it.
+/// List and sort a directory (or a directory inside an archive). If `path` is a file, its
+/// directory is loaded instead and the file gets selected. Runs on a loader thread; `cancel` aborts it.
 pub fn load(path: &Path, cancel: &AtomicBool) -> Result<Listing, String> {
+    if let Some((archive, inner)) = archive::split(path) {
+        return archive::load(path, archive, &inner, cancel);
+    }
     let start = Instant::now();
     let (dir, select) = directory_of(path)?;
 
@@ -219,7 +225,7 @@ pub fn load(path: &Path, cancel: &AtomicBool) -> Result<Listing, String> {
         entries.insert(0, Entry::parent());
     }
 
-    Ok(Listing { dir, entries, select, dirs, files, bytes, elapsed: start.elapsed() })
+    Ok(Listing { dir, entries, select, dirs, files, bytes, elapsed: start.elapsed(), archive: None })
 }
 
 /// A running load; `cancel` is set as soon as it is superseded.

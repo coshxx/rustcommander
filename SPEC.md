@@ -53,7 +53,9 @@ the steady-state frame time).
 |---|---|
 | Tab | Switch pane |
 | ↑ ↓ PgUp PgDn Home End | Move cursor |
-| Enter / double-click | Open directory, or open file via shell |
+| Enter / double-click | Open directory or archive, or open file via shell (from an archive: extracted to temp first) |
+| Shift+Enter | Open with the default program, also archives |
+| Ctrl+PgDn | Enter directory or archive (nothing else) |
 | Backspace, Ctrl+PgUp | Parent directory |
 | \ | Drive root (also works on German keyboard layouts) |
 | Alt+F1 / Alt+F2 | Choose drive for left / right pane |
@@ -115,8 +117,29 @@ without a dot. Num+ adds to the existing marks, Num− only removes matches. The
 - Tests: `cargo test` runs the operations against throw-away directories in `%TEMP%`.
   `RC_CONFIG_DIR` points the app to a separate config (used for GUI tests).
 
+## Archives
+
+- zip, 7z, rar, tar (also `.tar.gz/.tgz/.tar.bz2/.tbz2/.tar.xz/.txz/.tar.zst`), cab and iso open
+  like directories (detected by extension; Office files, `.jar`, `.apk` etc. open normally).
+  Path display like Total Commander: `C:\Downloads\fotos.zip\urlaub`; works in the path bar and is
+  restored on startup.
+- Reading uses libarchive as shipped with Windows 11 (`archiveint.dll`, loaded from System32 on
+  first use). Without it (Windows 10) entering an archive shows an error.
+- Read-only: F5 extracts (progress, cancel, conflict question like copying; file times are kept).
+  F6/F7/F8/Shift+F6 inside an archive and copying into one show "Archive sind schreibgeschützt".
+- Entry paths that would leave the destination (`..`, absolute paths, drive letters) are neither
+  listed nor extracted.
+- Enter on a file inside an archive extracts it to `%TEMP%\RustCommander\<session>\<n>\` and opens
+  it. The session directory is removed on exit (files still open elsewhere stay); leftovers older
+  than a day are removed at startup. Nothing outside `%TEMP%\RustCommander` is deleted.
+- The table of contents is read once and cached until the archive file changes; the panel
+  watches the directory that holds the archive.
+- Encrypted archives: the listing is shown if readable; extracting encrypted entries reports
+  "Passwörter werden noch nicht unterstützt".
+
 ## Deliberately later
 
-Parallel copying of many small files, shell context menu (long right press / Shift+F10, since a
-right click marks), system icons (async, cached), live filter, light theme, settings, normalizing path casing
+Archives: packing (Alt+F5) and writing into archives, password dialog, archives inside archives,
+7-Zip's `7z.dll` as a fallback for Windows 10. Parallel copying of many small files, shell context
+menu (long right press / Shift+F10, since a right click marks), system icons (async, cached), live filter, light theme, settings, normalizing path casing
 (typed `c:\windows` → `C:\Windows`), partial redraws (if frame time on large windows becomes an issue).

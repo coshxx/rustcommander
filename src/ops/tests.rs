@@ -203,3 +203,121 @@ fn rename_and_mkdir() {
     let (s, _) = run(Job::Rename { from: t.0.join("b.txt"), to: "neu".into() }, Answer::Skip);
     assert_eq!(s.errors.len(), 1);
 }
+
+// ---------- archives ----------
+
+/// Archive tests need libarchive from Windows 11 (`archiveint.dll`).
+fn libarchive_available() -> bool {
+    Path::new(r"C:\Windows\System32\archiveint.dll").exists()
+}
+
+/// Packs the contents of `dir` with the `tar.exe` that ships with Windows (`-a`: format from the
+/// file extension, e.g. `.zip`, `.7z`).
+fn pack(dir: &Path, archive: &Path) {
+    let ok = std::process::Command::new(r"C:\Windows\System32\tar.exe")
+        .arg("-a")
+        .arg("-cf")
+        .arg(archive)
+        .arg("-C")
+        .arg(dir)
+        .arg(".")
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    assert!(ok, "tar.exe failed for {}", archive.display());
+}
+
+/// A minimal ustar archive with the given (unchecked) entry names, to test hostile paths.
+fn make_tar(entries: &[(&str, &str)]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for (name, data) in entries {
+        let mut h = [0u8; 512];
+        h[..name.len()].copy_from_slice(name.as_bytes());
+        h[100..108].copy_from_slice(b"0000644\0");
+        h[108..116].copy_from_slice(b"0000000\0");
+        h[116..124].copy_from_slice(b"0000000\0");
+        h[124..136].copy_from_slice(format!("{:011o}\0", data.len()).as_bytes());
+        h[136..148].copy_from_slice(b"14000000000\0");
+        h[148..156].copy_from_slice(b"        ");
+        h[156] = b'0';
+        h[257..263].copy_from_slice(b"ustar\0");
+        h[263..265].copy_from_slice(b"00");
+        let sum: u32 = h.iter().map(|&b| b as u32).sum();
+        h[148..156].copy_from_slice(format!("{sum:06o}\0 ").as_bytes());
+        out.extend_from_slice(&h);
+        out.extend_from_slice(data.as_bytes());
+        out.resize(out.len().div_ceil(512) * 512, 0);
+    }
+    out.resize(out.len() + 1024, 0);
+    out
+}
+
+fn names_in(dir: &Path) -> Vec<String> {
+    let l = crate::files::listing::load(dir, &AtomicBool::new(false)).unwrap();
+    assert!(l.archive.is_some());
+    l.entries.iter().map(|e| String::from_utf16_lossy(&e.name)).collect()
+}
+
+#[test]
+fn archives_list_and_extract() {
+    if !libarchive_available() {
+        return;
+    }
+    for ext in ["zip", "7z"] {
+        let t = Scratch::new(&format!("archive-{ext}"));
+        write(&t.0.join("src/a.txt"), "A");
+        write(&t.0.join("src/sub/b.txt"), "BB");
+        write(&t.0.join("src/sub/deep/c.txt"), "CCC");
+        let archive = t.0.join(format!("x.{ext}"));
+        pack(&t.0.join("src"), &archive);
+
+        assert_eq!(names_in(&archive), ["..", "sub", "a.txt"], "{ext}");
+        assert_eq!(names_in(&archive.join("sub")), ["..", "deep", "b.txt"], "{ext}");
+
+        // A directory into an existing directory.
+        fs::create_dir_all(t.0.join("out")).unwrap();
+        let job = Job::Extract { sources: vec![archive.join("sub")], dest: t.0.join("out") };
+        let (s, _) = run(job, Answer::Skip);
+        assert!(s.errors.is_empty(), "{ext}: {:?}", s.errors);
+        assert_eq!(s.done, 1);
+        assert_eq!(fs::read_to_string(t.0.join("out/sub/b.txt")).unwrap(), "BB");
+        assert_eq!(fs::read_to_string(t.0.join("out/sub/deep/c.txt")).unwrap(), "CCC");
+
+        // Same again: two conflicts, skipped.
+        write(&t.0.join("out/sub/b.txt"), "unchanged");
+        let job = Job::Extract { sources: vec![archive.join("sub")], dest: t.0.join("out") };
+        let (s, conflicts) = run(job, Answer::Skip);
+        assert_eq!(conflicts, 2, "{ext}");
+        assert!(s.errors.is_empty());
+        assert_eq!(fs::read_to_string(t.0.join("out/sub/b.txt")).unwrap(), "unchanged");
+
+        // A single file under a new name.
+        let job = Job::Extract { sources: vec![archive.join("a.txt")], dest: t.0.join("renamed.txt") };
+        let (s, _) = run(job, Answer::Skip);
+        assert!(s.errors.is_empty(), "{ext}: {:?}", s.errors);
+        assert_eq!(fs::read_to_string(t.0.join("renamed.txt")).unwrap(), "A");
+        assert_eq!(s.select, Some(t.0.join("renamed.txt")));
+    }
+}
+
+#[test]
+fn archive_paths_never_leave_the_destination() {
+    if !libarchive_available() {
+        return;
+    }
+    let t = Scratch::new("archive-hostile");
+    let archive = t.0.join("bad.tar");
+    let tar = make_tar(&[("dir/ok.txt", "ok"), ("dir/../../evil.txt", "evil"), ("../evil2.txt", "evil")]);
+    fs::write(&archive, tar).unwrap();
+
+    // Hostile entries are not even listed; `dir` exists although only implied by `dir/ok.txt`.
+    assert_eq!(names_in(&archive), ["..", "dir"]);
+
+    fs::create_dir_all(t.0.join("out")).unwrap();
+    let (s, _) = run(Job::Extract { sources: vec![archive.join("dir")], dest: t.0.join("out") }, Answer::Skip);
+    assert!(s.errors.is_empty(), "{:?}", s.errors);
+    assert_eq!(fs::read_to_string(t.0.join("out/dir/ok.txt")).unwrap(), "ok");
+    assert!(!t.0.join("evil.txt").exists());
+    assert!(!t.0.join("out/evil.txt").exists());
+    assert!(!t.0.parent().unwrap().join("evil2.txt").exists());
+}

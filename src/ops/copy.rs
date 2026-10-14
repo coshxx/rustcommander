@@ -119,7 +119,7 @@ impl Worker {
     }
 
     /// Count a skipped file as done for the progress display.
-    fn skip_file(&mut self, len: u64) {
+    pub(super) fn skip_file(&mut self, len: u64) {
         self.progress.bytes_done += len;
         self.progress.files_done += 1;
     }

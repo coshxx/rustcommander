@@ -1,8 +1,10 @@
 //! File operations on a worker thread: copy, move, delete (permanent or to the recycle bin),
-//! rename, create directory. Reports progress, asks the UI about conflicts, can be cancelled.
+//! rename, create directory, extract from an archive. Reports progress, asks the UI about
+//! conflicts, can be cancelled.
 
 mod copy;
 mod delete;
+mod extract;
 mod moving;
 #[cfg(test)]
 mod tests;
@@ -21,11 +23,30 @@ const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
 const MAX_DEPTH: usize = 128;
 
 pub enum Job {
-    Copy { sources: Vec<PathBuf>, dest: PathBuf },
-    Move { sources: Vec<PathBuf>, dest: PathBuf },
-    Delete { sources: Vec<PathBuf>, recycle: bool },
-    Rename { from: PathBuf, to: OsString },
-    MkDir { path: PathBuf },
+    Copy {
+        sources: Vec<PathBuf>,
+        dest: PathBuf,
+    },
+    Move {
+        sources: Vec<PathBuf>,
+        dest: PathBuf,
+    },
+    Delete {
+        sources: Vec<PathBuf>,
+        recycle: bool,
+    },
+    Rename {
+        from: PathBuf,
+        to: OsString,
+    },
+    MkDir {
+        path: PathBuf,
+    },
+    /// Copy out of an archive; `sources` are paths inside it (`C:\x\a.zip\dir\file`).
+    Extract {
+        sources: Vec<PathBuf>,
+        dest: PathBuf,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -261,6 +282,7 @@ impl Worker {
                 }
                 Ok(())
             }
+            Job::Extract { sources, dest } => self.extract(&sources, &dest),
             Job::MkDir { path } => {
                 match std::fs::create_dir_all(&path) {
                     Ok(()) => {

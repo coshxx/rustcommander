@@ -56,7 +56,7 @@ impl App {
                 self.panels[p].search.clear();
                 self.panels[p].set_cursor(row);
                 if double {
-                    self.open_current();
+                    self.open_current(false);
                 }
             }
             Hit::Scrollbar(p) if !right => capture = self.press_scrollbar(p, y),

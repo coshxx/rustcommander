@@ -106,7 +106,7 @@ impl App {
                 let d = -p.page();
                 p.move_cursor(d);
             }
-            VK_NEXT => {
+            VK_NEXT if !ctrl => {
                 let d = p.page();
                 p.move_cursor(d);
             }
@@ -157,7 +157,11 @@ impl App {
             VK_PRIOR if ctrl => p.go_up(a, &self.sink),
             VK_RETURN => {
                 p.search.clear();
-                self.open_current();
+                self.open_current(shift);
+            }
+            VK_NEXT if ctrl => {
+                p.search.clear();
+                self.enter_current();
             }
             VK_BACK if !p.search.is_empty() => p.search_pop(),
             VK_BACK => p.go_up(a, &self.sink),

@@ -56,6 +56,8 @@ fn main() {
     unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, cell as isize) };
     cell_ref.with(|app| app.timing.mark("before ShowWindow"));
     show_window(hwnd, &cfg);
+    // Leftovers from files opened out of archives in earlier sessions.
+    std::thread::spawn(files::temp::sweep_old);
     cell_ref.with(|app| app.timing.mark("after ShowWindow"));
 
     let mut msg = MSG::default();
@@ -68,4 +70,5 @@ fn main() {
     // SAFETY: see above; the loop has ended and the window is destroyed.
     let cell = unsafe { Box::from_raw(cell) };
     cell.with(|app| app.timing.flush());
+    files::temp::cleanup_session();
 }

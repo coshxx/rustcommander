@@ -21,6 +21,7 @@ use crate::app::jobs::RunningJob;
 use crate::app::mouse::Drag;
 use crate::app::text_input::TextInput;
 use crate::config::Config;
+use crate::files::archive::is_archive_name;
 use crate::files::listing::{Kind, Loaded};
 use crate::files::watch::Watcher;
 use crate::panel::{Applied, LoadSink, Panel};
@@ -201,7 +202,10 @@ impl App {
                 Applied::Stale => continue,
                 Applied::Ok { dir_changed } => {
                     if dir_changed || self.panels[p].watcher.is_none() {
-                        let dir = &self.panels[p].dir;
+                        // Inside an archive, watch the directory holding it: a changed archive
+                        // file shows up there.
+                        let panel = &self.panels[p];
+                        let dir = panel.archive.as_deref().and_then(Path::parent).unwrap_or(&panel.dir);
                         self.panels[p].watcher = Watcher::new(dir, SendHwnd::new(self.hwnd), WM_APP_DIRCHANGED, p);
                     }
                 }
@@ -254,24 +258,34 @@ impl App {
         self.invalidate();
     }
 
-    /// Enter: open the directory under the cursor, or the file with its default program.
-    pub(crate) fn open_current(&mut self) {
+    /// Enter: into the directory or archive under the cursor, otherwise open the file with its
+    /// default program (from inside an archive: extract it first). `shell` (Shift+Enter) opens
+    /// archives with their default program as well.
+    pub(crate) fn open_current(&mut self, shell: bool) {
         let a = self.active;
         let p = &self.panels[a];
         let Some(e) = p.current() else { return };
-        match e.kind {
+        let (kind, in_archive, is_archive) = (e.kind, p.archive.is_some(), is_archive_name(&e.name));
+        let path = p.dir.join(e.os_name());
+        match kind {
             Kind::Parent => self.panels[a].go_up(a, &self.sink),
-            Kind::Dir => {
-                let path = p.dir.join(e.os_name());
-                self.navigate(a, path, None);
-            }
-            _ => {
-                if let Some(path) = p.current_path() {
-                    win::shell_open(path);
-                }
-            }
+            Kind::Dir => self.navigate(a, path, None),
+            _ if in_archive => self.open_from_archive(a, path),
+            _ if is_archive && !shell => self.navigate(a, path, None),
+            _ => win::shell_open(path),
         }
         self.arm_loading_indicator();
+    }
+
+    /// Ctrl+PgDn: like Enter, but only for directories and archives.
+    pub(crate) fn enter_current(&mut self) {
+        let p = &self.panels[self.active];
+        let enterable = p.current().is_some_and(|e| {
+            e.kind == Kind::Dir || (e.kind != Kind::Parent && p.archive.is_none() && is_archive_name(&e.name))
+        });
+        if enterable {
+            self.open_current(false);
+        }
     }
 
     /// If a panel is loading, repaint shortly after `LOADING_DELAY_MS` to show "loading".

@@ -34,9 +34,9 @@ thread touches.
 | `app/format.rs` | Pure helpers: size/date formatting, name checks, path parsing. |
 | `ui/` | Drawing only – reads `App`, never changes it. `paint()` redraws the whole window. |
 | `panel.rs` | One file list: directory, entries, cursor, scroll position, marks, quick search. |
-| `files/` | Files, but not operations on them: listing directories (`listing`), UTF-16 names and natural sort (`names`), marking masks (`mask`), change notifications (`watch`). |
-| `ops/` | File operations on a worker thread: `copy`, `moving`, `delete`; `mod.rs` holds the public API (`Job`, `Handle`, `Event`) and the shared worker logic. |
-| `sys/` | Thin safe wrappers around Win32 (`win`) and Direct2D/DirectWrite (`gfx`). |
+| `files/` | Files, but not operations on them: listing directories (`listing`), archives as read-only directories (`archive`), UTF-16 names and natural sort (`names`), marking masks (`mask`), change notifications (`watch`), temp files for opening entries of archives (`temp`). |
+| `ops/` | File operations on a worker thread: `copy`, `moving`, `delete`, `extract` (from archives); `mod.rs` holds the public API (`Job`, `Handle`, `Event`) and the shared worker logic. |
+| `sys/` | Thin safe wrappers around Win32 (`win`), Direct2D/DirectWrite (`gfx`) and libarchive from Windows' `archiveint.dll` (`libarchive`). |
 | `config.rs`, `theme.rs`, `timing.rs` | Settings file, colors, `--timing` measurements. |
 
 `App` is one struct, but its methods are spread over the files in `app/` and `ui/` (one
@@ -50,6 +50,7 @@ thread touches.
 | File operation worker | `App::start_job` → `ops::start` | `WM_APP_JOB` + channel | `App::on_job_event` |
 | Directory watcher (one per panel) | `App::on_loaded` | `WM_APP_DIRCHANGED` (wParam = panel) | `App::on_dir_changed` → throttled reload |
 | Shell open | `win::shell_open` | – | – |
+| Temp cleanup (once) | `main` (`files::temp::sweep_old`) | – | – |
 
 Data always travels through an `mpsc` channel; the posted message only wakes the UI thread.
 A loader result that arrives after a newer load was started is dropped (`Applied::Stale`).
@@ -58,6 +59,16 @@ through `Handle::answer`.
 
 Timers (`WM_TIMER`, IDs in `app/mod.rs`) are all one-shot: "loading" indicator, throttled
 refresh, notice timeout, delayed progress card, drag auto-repeat.
+
+## Archives
+
+A path like `C:\x\fotos.zip\urlaub` is an ordinary panel path. `files::listing::load` notices
+the archive part (`files::archive::split`) and lists from the archive's table of contents
+instead, which `files::archive::index` reads once with libarchive and caches. The `Listing`
+carries the archive path; a panel with `archive` set is read-only, so `app/dialogs.rs` turns F5
+into `Job::Extract` and refuses everything that would write. Extraction is one sequential pass
+over the archive (`ops/extract.rs`); entry paths go through `archive::clean_path`, which rejects
+anything that could leave the destination.
 
 ## Life of a key press
 

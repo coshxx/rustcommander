@@ -13,6 +13,9 @@ use crate::files::names::fold_case;
 use crate::ops::Job;
 use crate::sys::win::{self, Drive};
 
+/// Shown when something would write into an archive.
+const READ_ONLY: &str = "Archive sind schreibgeschützt";
+
 pub(crate) struct DrivePopup {
     pub(crate) panel: usize,
     pub(crate) drives: Vec<Drive>,
@@ -22,6 +25,8 @@ pub(crate) struct DrivePopup {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DialogKind {
     Copy,
+    /// Copy out of an archive.
+    Extract,
     Move,
     Delete {
         recycle: bool,
@@ -38,6 +43,7 @@ impl DialogKind {
     pub(crate) fn title(self) -> &'static str {
         match self {
             DialogKind::Copy => "Kopieren",
+            DialogKind::Extract => "Entpacken",
             DialogKind::Move => "Verschieben",
             DialogKind::Delete { recycle: true } => "In den Papierkorb",
             DialogKind::Delete { recycle: false } => "Endgültig löschen",
@@ -103,15 +109,30 @@ impl App {
             return;
         }
         let a = self.active;
+        // Archives are read-only: copying out of one extracts, everything that writes is refused.
+        let kind = match kind {
+            DialogKind::Copy if self.panels[a].archive.is_some() => DialogKind::Extract,
+            DialogKind::Move | DialogKind::Delete { .. } | DialogKind::Rename | DialogKind::MkDir
+                if self.panels[a].archive.is_some() =>
+            {
+                self.notify(READ_ONLY.into(), Tone::Info);
+                return;
+            }
+            _ => kind,
+        };
         let p = &self.panels[a];
         let (sources, message, input) = match kind {
-            DialogKind::Copy | DialogKind::Move => {
+            DialogKind::Copy | DialogKind::Extract | DialogKind::Move => {
                 let sources = p.targets();
                 let mut dest = self.panels[a ^ 1].dir.display().to_string();
                 if !dest.ends_with('\\') {
                     dest.push('\\');
                 }
-                let verb = if kind == DialogKind::Copy { "kopieren" } else { "verschieben" };
+                let verb = match kind {
+                    DialogKind::Copy => "kopieren",
+                    DialogKind::Extract => "entpacken",
+                    _ => "verschieben",
+                };
                 let msg = format!("{} {verb} nach:", describe(&sources));
                 (sources, msg, Some(TextInput::new(utf16(&dest))))
             }
@@ -162,12 +183,16 @@ impl App {
         }
         let job = match d.kind {
             DialogKind::Select { .. } => return,
-            DialogKind::Copy | DialogKind::Move => {
+            DialogKind::Copy | DialogKind::Extract | DialogKind::Move => {
                 let Some(dest) = parse_path(&utf16(&input), &dir) else { return };
-                if d.kind == DialogKind::Copy {
-                    Job::Copy { sources: d.sources, dest }
-                } else {
-                    Job::Move { sources: d.sources, dest }
+                if self.panels.iter().any(|p| p.archive.as_ref().is_some_and(|a| dest.starts_with(a))) {
+                    self.notify(READ_ONLY.into(), Tone::Info);
+                    return;
+                }
+                match d.kind {
+                    DialogKind::Copy => Job::Copy { sources: d.sources, dest },
+                    DialogKind::Extract => Job::Extract { sources: d.sources, dest },
+                    _ => Job::Move { sources: d.sources, dest },
                 }
             }
             DialogKind::Delete { recycle } => Job::Delete { sources: d.sources, recycle },
