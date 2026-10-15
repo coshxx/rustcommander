@@ -23,6 +23,15 @@ impl App {
         if self.drag.is_some() || matches!(self.mode, Mode::Dialog(_) | Mode::Conflict(_)) {
             return false;
         }
+        if let Mode::Options { .. } = self.mode {
+            match self.option_at(x, y) {
+                Some(Some(i)) if !right => self.toggle_option(i),
+                Some(_) => {}
+                None => self.mode = Mode::Normal,
+            }
+            self.invalidate();
+            return false;
+        }
         let hit = self.hit(x, y);
         if let Mode::Drives(_) = self.mode {
             match hit {
@@ -62,7 +71,12 @@ impl App {
             Hit::Scrollbar(p) if !right => capture = self.press_scrollbar(p, y),
             Hit::Drive(p) if !right => self.open_drives(p),
             Hit::Path(p) if !right => self.start_path_edit(p),
-            Hit::Drive(p) | Hit::Path(p) | Hit::Scrollbar(p) | Hit::Panel(p) => self.active = p,
+            Hit::Header(p, key) if !right => {
+                self.active = p;
+                self.panels[p].search.clear();
+                self.sort_by(p, key);
+            }
+            Hit::Drive(p) | Hit::Path(p) | Hit::Scrollbar(p) | Hit::Panel(p) | Hit::Header(p, _) => self.active = p,
             Hit::Popup(_) | Hit::Nothing => {}
         }
         self.invalidate();
@@ -112,21 +126,21 @@ impl App {
                 }
             }
             None => {
-                let hover = match self.hit(x, y) {
-                    Hit::Scrollbar(p) => Some(p),
-                    _ => None,
-                };
-                if hover != self.hover_bar {
-                    self.hover_bar = hover;
+                let hit = self.hit(x, y);
+                let bar = if let Hit::Scrollbar(p) = hit { Some(p) } else { None };
+                let header = if let Hit::Header(p, key) = hit { Some((p, key)) } else { None };
+                if bar != self.hover_bar || header != self.hover_header {
+                    self.hover_bar = bar;
+                    self.hover_header = header;
                     self.invalidate();
                 }
             }
         }
     }
 
-    /// `WM_MOUSELEAVE`: no scrollbar is hovered anymore.
+    /// `WM_MOUSELEAVE`: no scrollbar or column header is hovered anymore.
     pub fn on_mouse_leave(&mut self) {
-        if self.hover_bar.take().is_some() {
+        if self.hover_bar.take().is_some() | self.hover_header.take().is_some() {
             self.invalidate();
         }
     }

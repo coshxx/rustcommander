@@ -1,4 +1,4 @@
-//! Drawing what floats above the panels: dialogs, conflict question, drive popup,
+//! Drawing what floats above the panels: dialogs, options, conflict question, drive popup,
 //! progress and notice cards.
 
 use std::path::Path;
@@ -6,7 +6,8 @@ use std::path::Path;
 use crate::app::dialogs::{Dialog, DialogKind, DrivePopup};
 use crate::app::format::format_size;
 use crate::app::jobs::JOB_CARD_DELAY_MS;
-use crate::app::layout::{CARD_W, ICON_W, KEYBAR_H, ROW_H, STATUS_H};
+use crate::app::layout::{CARD_W, ICON_W, KEYBAR_H, OPTION_H, OPTIONS_ROWS_Y, ROW_H, STATUS_H};
+use crate::app::options::{LABELS, is_on};
 use crate::app::{App, Tone};
 use crate::sys::gfx::{Canvas, rect};
 use crate::ui::widgets::{draw_card, draw_chips, draw_input};
@@ -45,6 +46,29 @@ impl App {
         }
         let ok = if matches!(d.kind, DialogKind::Delete { .. }) { "Löschen" } else { "OK" };
         draw_chips(c, &self.gfx, t, x, y, 28.0, &[("Enter", ok), ("Esc", "Abbrechen")]);
+    }
+
+    /// Title, one checkbox row per option (`sel` highlighted), key chips.
+    pub(crate) fn draw_options(&self, c: &Canvas, sel: usize, w: f32, h: f32) {
+        let t = self.theme;
+        c.fill(rect(0.0, 0.0, w, h), crate::theme::rgba(0x000000, 0.35));
+        let r = Self::options_rect(w, h);
+        draw_card(c, t, r);
+        let x = r.left + 20.0;
+        let iw = r.right - r.left - 40.0;
+        c.text_str("Optionen", &c.fonts.path, rect(x, r.top + 16.0, iw, 28.0), t.text);
+        for (i, label) in LABELS.iter().enumerate() {
+            let y = r.top + OPTIONS_ROWS_Y + i as f32 * OPTION_H;
+            if i == sel {
+                c.fill_round(rect(x - 8.0, y, iw + 16.0, OPTION_H), 4.0, t.cursor_active);
+            }
+            // Segoe Fluent Icons: empty box / box with check mark.
+            let (glyph, col) = if is_on(self.options, i) { (0xE73A, t.accent) } else { (0xE739, t.text_dim) };
+            c.text(&[glyph], &c.fonts.icon, rect(x, y, ICON_W, OPTION_H), col);
+            c.text_str(label, &c.fonts.name, rect(x + ICON_W + 8.0, y, iw - ICON_W - 8.0, OPTION_H), t.text);
+        }
+        let y = r.top + OPTIONS_ROWS_Y + LABELS.len() as f32 * OPTION_H + 12.0;
+        draw_chips(c, &self.gfx, t, x, y, 28.0, &[("Leertaste", "Umschalten"), ("Esc", "Schließen")]);
     }
 
     pub(crate) fn draw_conflict(&self, c: &Canvas, path: &Path, w: f32, h: f32) {

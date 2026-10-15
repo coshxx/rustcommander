@@ -23,6 +23,19 @@ pub(crate) fn format_size(b: u64) -> String {
     format!("{} {}", s.replace('.', ","), UNITS[u])
 }
 
+/// Exact byte count with German thousands separators: `48.318.382.080`.
+pub(crate) fn format_bytes(b: u64) -> String {
+    let digits = b.to_string();
+    let mut out = String::with_capacity(digits.len() * 4 / 3);
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push('.');
+        }
+        out.push(c);
+    }
+    out
+}
+
 pub(crate) fn format_date(t: u64) -> String {
     if t == 0 {
         return String::new();
@@ -74,5 +87,14 @@ mod tests {
         assert!(!valid_name("", true));
         assert!(!valid_name("..", false));
         assert!(!valid_name("x?.txt", false));
+    }
+
+    #[test]
+    fn bytes() {
+        assert_eq!(format_bytes(0), "0");
+        assert_eq!(format_bytes(999), "999");
+        assert_eq!(format_bytes(1000), "1.000");
+        assert_eq!(format_bytes(48_318_382_080), "48.318.382.080");
+        assert_eq!(format_bytes(u64::MAX), "18.446.744.073.709.551.615");
     }
 }

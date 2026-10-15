@@ -1,4 +1,4 @@
-//! State of one file list: directory, entries, cursor, scroll position, quick search.
+//! State of one file list: directory, entries, sort order, cursor, scroll position, quick search.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -11,6 +11,7 @@ use crate::files::archive;
 use crate::files::dirsize::{self, DirSize};
 use crate::files::listing::{self, Entry, Kind, Listing, Loaded, Pending};
 use crate::files::names::{starts_with_ignore_case, to_utf16_nul};
+use crate::files::sort::{self, Sort};
 use crate::files::watch::Watcher;
 use crate::sys::win::SendHwnd;
 
@@ -48,6 +49,8 @@ pub struct Panel {
     /// Folder sizes counted with Space / Alt+Shift+Enter, by folder name. Kept across automatic
     /// refreshes, dropped when leaving the directory or reloading by hand.
     pub sizes: HashMap<Box<[u16]>, Arc<DirSize>>,
+    /// Column and direction; kept when changing directories.
+    pub sort: Sort,
 }
 
 /// Outcome of `Panel::apply`.
@@ -133,8 +136,9 @@ impl Panel {
         }
     }
 
-    /// Apply a load result if it is still the current one.
-    pub fn apply(&mut self, id: u64, result: Result<Listing, String>) -> Applied {
+    /// Apply a load result if it is still the current one. `sort_dirs`: folders follow the sort
+    /// column as well (option).
+    pub fn apply(&mut self, id: u64, result: Result<Listing, String>, sort_dirs: bool) -> Applied {
         let Some(p) = self.pending.take_if(|p| p.id == id) else {
             return Applied::Stale;
         };
@@ -173,6 +177,7 @@ impl Panel {
                         e.marked = marked.contains(&e.name);
                     }
                 }
+                self.sort_entries(sort_dirs);
                 // Selected entry gone (e.g. deleted)? Stay at the same position.
                 let idx = select.and_then(|s| self.entries.iter().position(|e| *e.name == *s)).unwrap_or(if same_dir {
                     old_cursor
@@ -196,6 +201,23 @@ impl Panel {
                 Applied::Failed { path: p.path }
             }
         }
+    }
+
+    /// Sort again (order or option changed, a folder count finished); the cursor stays on its
+    /// entry, the view where it is.
+    pub fn resort(&mut self, sort_dirs: bool) {
+        let current = self.current().map(|e| e.name.clone());
+        self.sort_entries(sort_dirs);
+        if let Some(i) = current.and_then(|n| self.entries.iter().position(|e| e.name == n)) {
+            self.cursor = i;
+        }
+    }
+
+    /// Only finished folder counts take part; a running one would make the order jump.
+    fn sort_entries(&mut self, sort_dirs: bool) {
+        let sizes = &self.sizes;
+        let size = |e: &Entry| sizes.get(&e.name).filter(|s| s.done()).map(|s| s.bytes());
+        sort::sort(&mut self.entries, self.sort, sort_dirs, size);
     }
 
     // ---------- marks ----------

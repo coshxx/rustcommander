@@ -1,10 +1,11 @@
-//! Keyboard input: key presses (`WM_KEYDOWN`) and typed characters (`WM_CHAR`).
+//! Keyboard input: key presses (`WM_KEYDOWN`) and typed characters (`WM_CHAR`, `WM_SYSCHAR`).
 
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 
 use crate::app::dialogs::DialogKind;
 use crate::app::{App, Mode};
 use crate::files::names::fold_case;
+use crate::files::sort::SortKey;
 use crate::ops::Answer;
 use crate::sys::win;
 
@@ -51,6 +52,22 @@ impl App {
                 }
                 _ => d.input.as_mut().is_some_and(|i| i.key(vk, ctrl, hwnd)),
             },
+            Mode::Options { sel } => {
+                let n = crate::app::options::LABELS.len();
+                match vk {
+                    VK_UP => *sel = sel.saturating_sub(1),
+                    VK_DOWN => *sel = (*sel + 1).min(n - 1),
+                    VK_HOME => *sel = 0,
+                    VK_END => *sel = n - 1,
+                    VK_SPACE | VK_RETURN => {
+                        let i = *sel;
+                        self.toggle_option(i);
+                    }
+                    VK_ESCAPE => self.mode = Mode::Normal,
+                    _ => return false,
+                }
+                true
+            }
             Mode::Conflict(_) => match vk {
                 VK_RETURN => {
                     self.answer_conflict(Answer::Overwrite);
@@ -145,7 +162,7 @@ impl App {
         true
     }
 
-    /// Switching panels, navigation, quick search editing and the file operation keys.
+    /// Switching panels, navigation, quick search editing, sorting and the file operation keys.
     fn command_key(&mut self, vk: VIRTUAL_KEY, ctrl: bool, shift: bool) -> bool {
         let a = self.active;
         let p = &mut self.panels[a];
@@ -179,6 +196,10 @@ impl App {
             VK_F2 => self.reload_by_hand(),
             VK_R if ctrl => self.reload_by_hand(),
             VK_L if ctrl => self.start_path_edit(a),
+            VK_OEM_COMMA if ctrl => self.open_options(),
+            VK_F3 if ctrl => self.sort_by(a, SortKey::Name),
+            VK_F5 if ctrl => self.sort_by(a, SortKey::Date),
+            VK_F6 if ctrl => self.sort_by(a, SortKey::Size),
             VK_F3 => self.view_current(),
             VK_F5 => self.open_dialog(DialogKind::Copy),
             VK_F6 if shift => self.open_dialog(DialogKind::Rename),
@@ -232,6 +253,7 @@ impl App {
                     i.insert(c);
                 }
             }
+            Mode::Options { .. } => {}
             Mode::Conflict(_) => match char::from_u32(fold_case(c)) {
                 Some('s') => self.answer_conflict(Answer::Skip),
                 Some('a') => self.answer_conflict(Answer::OverwriteAll),
@@ -246,11 +268,23 @@ impl App {
                     self.arm_loading_indicator();
                 } else if c == b' ' as u16 && p.search.is_empty() {
                     self.space();
-                } else {
+                } else if !self.options.alt_search || !p.search.is_empty() {
+                    // With the Alt option, plain characters only continue a running search.
                     p.search_push(c);
                 }
             }
         }
         self.invalidate();
+    }
+
+    /// Alt+character: starts or continues the quick search if the Alt option is on.
+    /// `false` = not used (Alt+Space must still open the system menu).
+    pub fn on_syschar(&mut self, c: u16) -> bool {
+        if !self.options.alt_search || !matches!(self.mode, Mode::Normal) || c <= 0x20 || c == 0x7f {
+            return false;
+        }
+        self.panels[self.active].search_push(c);
+        self.invalidate();
+        true
     }
 }
