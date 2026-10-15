@@ -2,6 +2,8 @@
 
 A Total Commander clone vibed in Rust with a focus on speed and architecture.
 
+![RustCommander: two panes, key bar at the bottom](screenshot.png)
+
 ## RustCommander vs. Total Commander
 
 | | Total Commander 11.00 (x64) | RustCommander |
