@@ -22,8 +22,9 @@ thread touches.
 
 | Path | What it is |
 |---|---|
+| `build.rs`, `res/` | Embeds the icon into the exe (`rc.exe`); `make-icon.ps1` draws `app.ico`. |
 | `main.rs` | Startup: arguments, config, window, message loop. |
-| `window.rs` | Window class, `wndproc` (routes every message to an `App` method), `AppCell`. |
+| `window.rs` | Window class, title, icon, `wndproc` (routes every message to an `App` method), `AppCell`. |
 | `app/` | The application state and everything that changes it. |
 | `app/mod.rs` | `App` struct, `Mode` (normal / dialog / popup …), timers, directory load results. |
 | `app/keyboard.rs`, `app/mouse.rs` | Input handling. |

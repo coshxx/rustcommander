@@ -16,7 +16,7 @@ use crate::lister::{Lister, WM_APP_SEARCH, settings};
 use crate::ops::error_text;
 use crate::sys::mapped::MappedFile;
 use crate::theme;
-use crate::window::{AppCell, dark_title_bar, show_window};
+use crate::window::{AppCell, app_icon, dark_title_bar, show_window};
 
 const CLASS: windows::core::PCWSTR = w!("RustCommanderLister");
 
@@ -36,6 +36,8 @@ fn register_class() {
             lpfnWndProc: Some(wndproc),
             hInstance: GetModuleHandleW(None).unwrap_or_default().into(),
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
+            hIcon: app_icon(SM_CXICON).unwrap_or_default(),
+            hIconSm: app_icon(SM_CXSMICON).unwrap_or_default(),
             hbrBackground: CreateSolidBrush(COLORREF(theme::colorref(theme::DARK.bg))),
             lpszClassName: CLASS,
             ..Default::default()

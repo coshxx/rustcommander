@@ -1,0 +1,2 @@
+// Compiled by build.rs with rc.exe and linked into the exe.
+1 ICON "app.ico"
