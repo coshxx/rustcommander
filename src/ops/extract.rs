@@ -2,6 +2,7 @@
 //! at or below one of the selected items. Entry paths that would leave the destination
 //! (`..`, absolute paths) are never written.
 
+use crate::i18n::t;
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -34,7 +35,7 @@ impl Worker {
     /// treated like the destination of a copy.
     pub(super) fn extract(&mut self, sources: &[PathBuf], dest: &Path) -> Result<(), Cancelled> {
         let Some((archive_path, _)) = sources.first().and_then(|s| archive::split(s)) else {
-            self.error(dest, "Quelle liegt in keinem Archiv");
+            self.error(dest, t("error.not_in_archive"));
             return Ok(());
         };
         let ends_with_sep = dest.as_os_str().to_string_lossy().ends_with(['\\', '/']);
@@ -52,7 +53,7 @@ impl Worker {
                 (Some((a, inner)), Some(target)) if a == archive_path && !inner.is_empty() => {
                     wanted.push(Wanted { inner, target, found: false, failed: false });
                 }
-                _ => self.error(s, "liegt nicht im selben Archiv"),
+                _ => self.error(s, t("error.other_archive")),
             }
         }
 
@@ -95,7 +96,7 @@ impl Worker {
                 }
                 EntryType::Other => {}
                 EntryType::File if h.encrypted => {
-                    self.error(&out, "verschlüsselt – Passwörter werden noch nicht unterstützt");
+                    self.error(&out, t("error.encrypted_entry"));
                     self.skip_file(h.size);
                 }
                 EntryType::File => self.extract_file(&mut reader, &out, h.size, h.mtime, &mut buf)?,
@@ -107,7 +108,7 @@ impl Worker {
 
         for w in &wanted {
             if !w.found {
-                self.error(&w.target, "nicht im Archiv gefunden");
+                self.error(&w.target, t("error.missing_in_archive"));
             } else if !w.failed {
                 self.summary.done += 1;
             }
@@ -142,7 +143,7 @@ impl Worker {
         }
         if let Ok(meta) = std::fs::symlink_metadata(out) {
             if meta.is_dir() {
-                self.error(out, "ein Ordner mit diesem Namen existiert bereits");
+                self.error(out, t("error.folder_exists"));
                 self.skip_file(size);
                 return Ok(());
             }

@@ -7,20 +7,22 @@ use crate::app::dialogs::{Dialog, DialogKind, DrivePopup};
 use crate::app::format::format_size;
 use crate::app::jobs::JOB_CARD_DELAY_MS;
 use crate::app::layout::{CARD_W, ICON_W, KEYBAR_H, OPTION_H, OPTIONS_ROWS_Y, ROW_H, STATUS_H};
-use crate::app::options::{LABELS, is_on};
+use crate::app::options::{LANGUAGE_ROW, ROWS, SWITCHES, is_on};
 use crate::app::{App, Tone};
+use crate::i18n::{self, Lang, t, tf};
 use crate::sys::gfx::{Canvas, rect};
 use crate::ui::widgets::{draw_card, draw_chips, draw_input};
 
 /// Icon and label for a drive type (`GetDriveTypeW`).
 fn drive_info(kind: u32) -> (u16, &'static str) {
-    match kind {
-        2 => (0xE88E, "Wechseldatenträger"),
-        4 => (0xE8CE, "Netzwerk"),
-        5 => (0xE958, "CD/DVD"),
-        6 => (0xEDA2, "RAM-Disk"),
-        _ => (0xEDA2, "Lokaler Datenträger"),
-    }
+    let (glyph, key) = match kind {
+        2 => (0xE88E, "drive.removable"),
+        4 => (0xE8CE, "drive.network"),
+        5 => (0xE958, "drive.cd"),
+        6 => (0xEDA2, "drive.ram"),
+        _ => (0xEDA2, "drive.local"),
+    };
+    (glyph, t(key))
 }
 
 impl App {
@@ -44,31 +46,64 @@ impl App {
             draw_input(c, &self.gfx, t, rect(x, y, iw, 32.0), input, Some(cx));
             y += input_h;
         }
-        let ok = if matches!(d.kind, DialogKind::Delete { .. }) { "Löschen" } else { "OK" };
-        draw_chips(c, &self.gfx, t, x, y, 28.0, &[("Enter", ok), ("Esc", "Abbrechen")]);
+        let ok =
+            i18n::t(if matches!(d.kind, DialogKind::Delete { .. }) { "dialog.delete_button" } else { "common.ok" });
+        draw_chips(c, &self.gfx, t, x, y, 28.0, &[("Enter", ok), ("Esc", i18n::t("common.cancel"))]);
     }
 
-    /// Title, one checkbox row per option (`sel` highlighted), key chips.
-    pub(crate) fn draw_options(&self, c: &Canvas, sel: usize, w: f32, h: f32) {
+    /// Title, the language row, one checkbox row per switch (`sel` highlighted), key chips; the
+    /// language list on top when it is open.
+    pub(crate) fn draw_options(&self, c: &Canvas, sel: usize, popup: Option<usize>, w: f32, h: f32) {
         let t = self.theme;
         c.fill(rect(0.0, 0.0, w, h), crate::theme::rgba(0x000000, 0.35));
         let r = Self::options_rect(w, h);
         draw_card(c, t, r);
         let x = r.left + 20.0;
         let iw = r.right - r.left - 40.0;
-        c.text_str("Optionen", &c.fonts.path, rect(x, r.top + 16.0, iw, 28.0), t.text);
-        for (i, label) in LABELS.iter().enumerate() {
-            let y = r.top + OPTIONS_ROWS_Y + i as f32 * OPTION_H;
-            if i == sel {
+        c.text_str(i18n::t("options.title"), &c.fonts.path, rect(x, r.top + 16.0, iw, 28.0), t.text);
+        for row in 0..ROWS {
+            let y = r.top + OPTIONS_ROWS_Y + row as f32 * OPTION_H;
+            if row == sel {
                 c.fill_round(rect(x - 8.0, y, iw + 16.0, OPTION_H), 4.0, t.cursor_active);
             }
+            let label_x = x + ICON_W + 8.0;
+            if row == LANGUAGE_ROW {
+                // Segoe Fluent Icons: globe; the current language on the right with a ▾.
+                c.text(&[0xE774], &c.fonts.icon, rect(x, y, ICON_W, OPTION_H), t.accent);
+                c.text_str(i18n::t("options.language"), &c.fonts.name, rect(label_x, y, iw / 2.0, OPTION_H), t.text);
+                let value = format!("{}  ▾", i18n::lang().native_name());
+                c.text_str(&value, &c.fonts.right, rect(x, y, iw - 4.0, OPTION_H), t.text);
+                continue;
+            }
+            let i = row - 1;
             // Segoe Fluent Icons: empty box / box with check mark.
             let (glyph, col) = if is_on(self.options, i) { (0xE73A, t.accent) } else { (0xE739, t.text_dim) };
             c.text(&[glyph], &c.fonts.icon, rect(x, y, ICON_W, OPTION_H), col);
-            c.text_str(label, &c.fonts.name, rect(x + ICON_W + 8.0, y, iw - ICON_W - 8.0, OPTION_H), t.text);
+            c.text_str(i18n::t(SWITCHES[i]), &c.fonts.name, rect(label_x, y, iw - ICON_W - 8.0, OPTION_H), t.text);
         }
-        let y = r.top + OPTIONS_ROWS_Y + LABELS.len() as f32 * OPTION_H + 12.0;
-        draw_chips(c, &self.gfx, t, x, y, 28.0, &[("Leertaste", "Umschalten"), ("Esc", "Schließen")]);
+        let y = r.top + OPTIONS_ROWS_Y + ROWS as f32 * OPTION_H + 12.0;
+        let action = i18n::t(if sel == LANGUAGE_ROW { "options.choose" } else { "options.toggle" });
+        draw_chips(c, &self.gfx, t, x, y, 28.0, &[("Enter", action), ("Esc", i18n::t("common.close"))]);
+        if let Some(p) = popup {
+            let pr = Self::language_popup_rect(w, h);
+            let shadow = rect(pr.left + 2.0, pr.top + 4.0, pr.right - pr.left, pr.bottom - pr.top);
+            c.fill_round(shadow, 8.0, crate::theme::rgba(0x000000, 0.35));
+            c.fill_round(pr, 8.0, t.popup_bg);
+            c.stroke_round(pr, 8.0, 1.0, t.popup_border);
+            for (i, lang) in Lang::ALL.iter().enumerate() {
+                let y = pr.top + 4.0 + i as f32 * ROW_H;
+                if i == p {
+                    c.fill_round(rect(pr.left + 4.0, y, pr.right - pr.left - 8.0, ROW_H), 4.0, t.cursor_active);
+                }
+                let col = if *lang == i18n::lang() { t.accent } else { t.text };
+                c.text_str(
+                    lang.native_name(),
+                    &c.fonts.name,
+                    rect(pr.left + 14.0, y, pr.right - pr.left - 20.0, ROW_H),
+                    col,
+                );
+            }
+        }
     }
 
     pub(crate) fn draw_conflict(&self, c: &Canvas, path: &Path, w: f32, h: f32) {
@@ -80,14 +115,15 @@ impl App {
         draw_card(c, t, r);
         let x = r.left + 20.0;
         let iw = dw - 40.0;
-        c.text_str("Ziel existiert bereits", &c.fonts.path, rect(x, r.top + 16.0, iw, 28.0), t.marked);
+        c.text_str(i18n::t("conflict.title"), &c.fonts.path, rect(x, r.top + 16.0, iw, 28.0), t.marked);
         c.text_str(&path.display().to_string(), &c.fonts.name, rect(x, r.top + 44.0, iw, 26.0), t.text_dim);
+        let tr = i18n::t;
         let chips = [
-            ("Enter", "Überschreiben"),
-            ("S", "Überspringen"),
-            ("A", "Alle überschreiben"),
-            ("K", "Keine überschreiben"),
-            ("Esc", "Abbrechen"),
+            ("Enter", tr("conflict.overwrite")),
+            (tr("conflict.skip_key"), tr("conflict.skip")),
+            (tr("conflict.all_key"), tr("conflict.all")),
+            (tr("conflict.none_key"), tr("conflict.none")),
+            ("Esc", tr("common.cancel")),
         ];
         draw_chips(c, &self.gfx, t, x, r.top + 74.0, 28.0, &chips);
     }
@@ -128,12 +164,17 @@ impl App {
             if frac > 0.0 {
                 c.fill_round(rect(ix, bar.top, (iw * frac).max(6.0), 6.0), 3.0, t.accent);
             }
-            let mut stats = format!("{} / {} Dateien", p.files_done, p.files_total);
+            let mut stats = tf("job.files", &[("done", &p.files_done), ("total", &p.files_total)]);
             if p.bytes_total > 0 {
                 stats += &format!("  ·  {} / {}", format_size(p.bytes_done), format_size(p.bytes_total));
             }
             c.text_str(&stats, &c.fonts.small, rect(ix, r.top + 64.0, iw, 22.0), t.text_dim);
-            c.text_str("Esc bricht ab", &c.fonts.small_right, rect(ix, r.top + 64.0, iw, 22.0), t.text_hidden);
+            c.text_str(
+                i18n::t("common.esc_cancels"),
+                &c.fonts.small_right,
+                rect(ix, r.top + 64.0, iw, 22.0),
+                t.text_hidden,
+            );
         } else if let Some(n) = &self.notice {
             let r = rect(x, bottom - 40.0, cw, 40.0);
             draw_card(c, t, r);

@@ -1,5 +1,6 @@
 //! Deleting: to the recycle bin via the shell, or permanently without following links.
 
+use crate::i18n::{t, tf};
 use std::path::{Path, PathBuf};
 
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
@@ -59,7 +60,7 @@ impl Worker {
         };
         if m.is_dir() && !is_reparse(&m) {
             if depth >= MAX_DEPTH {
-                self.error(path, "Verzeichnisbaum zu tief");
+                self.error(path, t("error.too_deep"));
                 return Ok(());
             }
             let entries = match std::fs::read_dir(path) {
@@ -109,7 +110,7 @@ impl Worker {
         if op.fAnyOperationsAborted.as_bool() {
             self.summary.cancelled = true;
         } else if res != 0 {
-            self.summary.errors.push(format!("Papierkorb: Fehler 0x{res:x}"));
+            self.summary.errors.push(tf("error.recycle", &[("code", &format!("{res:x}"))]));
         } else {
             self.summary.done = sources.len() as u64;
         }

@@ -32,7 +32,7 @@ impl Mode {
     pub fn label(self) -> &'static str {
         match self {
             Mode::Text => "Text",
-            Mode::Binary => "Binär",
+            Mode::Binary => crate::i18n::t("lister.binary"),
             Mode::Hex => "Hex",
         }
     }

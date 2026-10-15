@@ -29,6 +29,7 @@ use crate::files::archive::is_archive_name;
 use crate::files::listing::{Kind, Loaded};
 use crate::files::sort::SortKey;
 use crate::files::watch::Watcher;
+use crate::i18n::{t, tf};
 use crate::panel::{Applied, LoadSink, Panel};
 use crate::sys::gfx::Gfx;
 use crate::sys::win::{self, SendHwnd};
@@ -77,8 +78,9 @@ pub(crate) enum Mode {
     Dialog(Dialog),
     /// A running job waits for an answer about this existing target.
     Conflict(PathBuf),
-    /// The options dialog (Ctrl+,); `sel` = highlighted option.
-    Options { sel: usize },
+    /// The options dialog (Ctrl+,); `sel` = highlighted row, `popup` = open language list with
+    /// its highlighted entry.
+    Options { sel: usize, popup: Option<usize> },
     /// The search dialog (Alt+F7); its state is `App::find`.
     Find,
 }
@@ -135,8 +137,12 @@ pub struct App {
     pub(crate) hover_bar: Option<usize>,
     /// Column header under the mouse (panel, column).
     pub(crate) hover_header: Option<(usize, SortKey)>,
+    /// Mouse over the gear button in the key bar.
+    pub(crate) hover_gear: bool,
     /// Last mask used for Num+ / Num−.
     pub(crate) mask: String,
+    /// Program for F4 (from config.json; Notepad by default).
+    pub(crate) editor: String,
     /// Switched in the options dialog; saved right away.
     pub(crate) options: Options,
     /// The key that just opened a dialog also produces a WM_CHAR (e.g. Num+ → '+'): drop it.
@@ -187,7 +193,9 @@ impl App {
             drag_timer_armed: false,
             hover_bar: None,
             hover_header: None,
+            hover_gear: false,
             mask: cfg.mask.clone().unwrap_or_else(|| "*.*".into()),
+            editor: cfg.editor.clone().unwrap_or_else(|| crate::config::DEFAULT_EDITOR.into()),
             options: cfg.options,
             swallow_next_char: false,
             view_requests: Vec::new(),
@@ -205,6 +213,7 @@ impl App {
         let mut cfg = Config {
             active: self.active,
             mask: Some(self.mask.clone()),
+            editor: Some(self.editor.clone()),
             lister: crate::lister::settings(),
             options: self.options,
             sorts: [self.panels[0].sort, self.panels[1].sort],
@@ -352,6 +361,31 @@ impl App {
         }
     }
 
+    /// F4: open the file under the cursor in the editor (not inside archives: they are
+    /// read-only, changes would be lost).
+    pub(crate) fn edit_current(&mut self) {
+        let p = &self.panels[self.active];
+        let Some(e) = p.current().filter(|e| !e.is_dir()) else { return };
+        if p.archive.is_some() {
+            self.notify(t("notice.read_only").into(), Tone::Info);
+            return;
+        }
+        let path = p.dir.join(e.os_name());
+        self.edit(&path);
+    }
+
+    /// Start the editor on `path`.
+    pub(crate) fn edit(&mut self, path: &Path) {
+        let mut cmd = std::process::Command::new(&self.editor);
+        cmd.arg(path);
+        if let Some(dir) = path.parent() {
+            cmd.current_dir(dir);
+        }
+        if let Err(e) = cmd.spawn() {
+            self.notify(tf("notice.editor_failed", &[("editor", &self.editor), ("error", &e)]), Tone::Error);
+        }
+    }
+
     /// Open `path` in a lister. The window is created on `WM_APP_VIEW`, outside of this
     /// handler: creating a window sends messages to the main window synchronously.
     pub(crate) fn request_view(&mut self, path: PathBuf) {
@@ -365,7 +399,7 @@ impl App {
         let a = self.active;
         let p = &mut self.panels[a];
         if p.archive.is_some() {
-            self.notify("Kein Kontextmenü in Archiven".into(), Tone::Info);
+            self.notify(t("notice.no_context_menu").into(), Tone::Info);
             return;
         }
         let mut paths = p.targets();

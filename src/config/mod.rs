@@ -1,12 +1,13 @@
 //! Settings file `%APPDATA%\RustCommander\config.json`. Missing or broken values fall back to
 //! the defaults; unknown keys are ignored.
 
-mod json;
+pub(crate) mod json;
 
 use std::path::PathBuf;
 
 use self::json::Value;
 use crate::files::sort::{Sort, SortKey};
+use crate::i18n::Lang;
 use crate::lister;
 
 #[derive(Default)]
@@ -19,6 +20,8 @@ pub struct Config {
     pub window: Option<([i32; 4], bool)>,
     /// Last file mask for marking (Num+ / Num−).
     pub mask: Option<String>,
+    /// Program for F4; the file is passed as its argument. `None` = Notepad.
+    pub editor: Option<String>,
     /// Lister window position and wrapping.
     pub lister: lister::Settings,
     /// What can be switched in the options dialog (Ctrl+,).
@@ -33,6 +36,10 @@ pub struct Options {
     pub alt_search: bool,
     /// Folders are sorted by the chosen column too (by size: only counted ones).
     pub sort_dirs: bool,
+    /// Space marks without moving the cursor down (Insert still moves).
+    pub space_stays: bool,
+    /// UI language chosen in the options; `None` = follow the Windows language.
+    pub language: Option<Lang>,
 }
 
 /// `{"left", "top", "right", "bottom", "maximized"}` → window placement.
@@ -49,6 +56,9 @@ fn window_json((r, max): ([i32; 4], bool)) -> Value {
     members.push(("maximized".into(), Value::Bool(max)));
     Value::Obj(members)
 }
+
+/// F4 editor unless config.json names another one.
+pub const DEFAULT_EDITOR: &str = "notepad.exe";
 
 /// `{"by": "size", "desc": true}` → sort order.
 fn parse_sort(v: &Value) -> Option<Sort> {
@@ -97,6 +107,7 @@ impl Config {
         }
         cfg.window = root.get("window").and_then(parse_window);
         cfg.mask = str_at(&root, "mask");
+        cfg.editor = str_at(&root, "editor").filter(|e| !e.trim().is_empty());
         if let Some(l) = root.get("lister") {
             cfg.lister.window = l.get("window").and_then(parse_window);
             cfg.lister.wrap = bool_at(l, "wrap").unwrap_or(cfg.lister.wrap);
@@ -107,6 +118,8 @@ impl Config {
                 exact_sizes: bool_at(o, "exact_sizes").unwrap_or(d.exact_sizes),
                 alt_search: bool_at(o, "alt_search").unwrap_or(d.alt_search),
                 sort_dirs: bool_at(o, "sort_dirs").unwrap_or(d.sort_dirs),
+                space_stays: bool_at(o, "space_stays").unwrap_or(d.space_stays),
+                language: str_at(o, "language").and_then(|l| Lang::from_id(&l)),
             };
         }
         cfg
@@ -130,6 +143,8 @@ impl Config {
         if let Some(m) = &self.mask {
             members.push(("mask", Value::Str(m.clone())));
         }
+        // Always written, so it can be found and changed in the file.
+        members.push(("editor", Value::Str(self.editor.clone().unwrap_or_else(|| DEFAULT_EDITOR.into()))));
         let mut lister = Vec::new();
         if let Some(w) = self.lister.window {
             lister.push(("window", window_json(w)));
@@ -137,14 +152,17 @@ impl Config {
         lister.push(("wrap", Value::Bool(self.lister.wrap)));
         members.push(("lister", obj(lister)));
         let o = self.options;
-        members.push((
-            "options",
-            obj(vec![
-                ("exact_sizes", Value::Bool(o.exact_sizes)),
-                ("alt_search", Value::Bool(o.alt_search)),
-                ("sort_dirs", Value::Bool(o.sort_dirs)),
-            ]),
-        ));
+        let mut options = vec![
+            ("exact_sizes", Value::Bool(o.exact_sizes)),
+            ("alt_search", Value::Bool(o.alt_search)),
+            ("sort_dirs", Value::Bool(o.sort_dirs)),
+            ("space_stays", Value::Bool(o.space_stays)),
+        ];
+        // Only once chosen; until then the Windows language is used.
+        if let Some(l) = o.language {
+            options.push(("language", Value::Str(l.id().into())));
+        }
+        members.push(("options", obj(options)));
         obj(members)
     }
 
@@ -166,15 +184,23 @@ mod tests {
             active: 1,
             window: Some(([10, 20, 1610, 920], true)),
             mask: Some("*.rs".into()),
+            editor: Some(r"C:\Tools\npp\notepad++.exe".into()),
             lister: lister::Settings { window: Some(([-5, 0, 800, 600], false)), wrap: false },
             sorts: [Sort { key: SortKey::Size, desc: true }, Sort::default()],
-            options: Options { exact_sizes: true, alt_search: false, sort_dirs: true },
+            options: Options {
+                exact_sizes: true,
+                alt_search: false,
+                sort_dirs: true,
+                space_stays: true,
+                language: Some(Lang::De),
+            },
         };
         let back = Config::parse(&cfg.to_json().to_pretty());
         assert_eq!(back.paths, cfg.paths);
         assert_eq!(back.active, 1);
         assert_eq!(back.window, cfg.window);
         assert_eq!(back.mask, cfg.mask);
+        assert_eq!(back.editor, cfg.editor);
         assert_eq!(back.lister.window, cfg.lister.window);
         assert!(!back.lister.wrap);
         assert_eq!(back.options, cfg.options);

@@ -198,7 +198,7 @@ pub fn load(path: &Path, archive: PathBuf, inner: &str, cancel: &AtomicBool) -> 
             let (parent, name) = inner.rsplit_once('\\').unwrap_or(("", inner));
             let found = index.dir(parent).is_some_and(|l| l.iter().any(|i| String::from_utf16_lossy(&i.name) == name));
             if !found {
-                return Err(format!("„{inner}“ gibt es in diesem Archiv nicht"));
+                return Err(crate::i18n::tf("error.no_such_entry", &[("name", &inner)]));
             }
             let dir = path.parent().unwrap_or(path).to_path_buf();
             (dir, parent.to_string(), Some(name.encode_utf16().collect()))

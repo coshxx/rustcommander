@@ -14,7 +14,7 @@ use crate::app::layout::KEYBAR_H;
 use crate::app::{App, Mode};
 use crate::sys::gfx::rect;
 use crate::sys::win::SendHwnd;
-use crate::ui::widgets::HINTS;
+use crate::ui::widgets::{HINTS, hint};
 
 impl App {
     /// `WM_PAINT`: draw the whole window.
@@ -34,7 +34,10 @@ impl App {
             self.hint_widths = Some(
                 HINTS
                     .iter()
-                    .map(|(k, l)| (self.gfx.measure(&utf16(k), &f.small_center), self.gfx.measure(&utf16(l), &f.small)))
+                    .map(|id| {
+                        let (k, l) = hint(id);
+                        (self.gfx.measure(&utf16(k), &f.small_center), self.gfx.measure(&utf16(l), &f.small))
+                    })
                     .collect(),
             );
         }
@@ -57,10 +60,11 @@ impl App {
             Mode::Drives(d) => self.draw_drives(&c, d, w),
             Mode::Dialog(d) => self.draw_dialog(&c, d, w, h, caret_x),
             Mode::Conflict(path) => self.draw_conflict(&c, path, w, h),
-            Mode::Options { sel } => self.draw_options(&c, *sel, w, h),
+            Mode::Options { sel, popup } => self.draw_options(&c, *sel, *popup, w, h),
             Mode::Find => self.draw_find(&c, w, h, caret_x),
             _ => {}
         }
+        self.draw_gear_tip(&c, w, h);
         self.gfx.end();
 
         if !self.painted {

@@ -13,10 +13,11 @@ use crate::app::text_input::TextInput;
 use crate::app::{App, Mode, TIMER_FIND, WM_APP_FIND};
 use crate::files::find::{self, Hit, Query, Search};
 use crate::files::names::natural_cmp;
+use crate::i18n::tf;
 use crate::sys::win::{self, SendHwnd};
 
-/// Labels of the input fields, in order.
-pub(crate) const LABELS: [&str; 3] = ["Name", "Suchen in", "Enthält Text"];
+/// Translation keys of the input fields' labels, in order.
+pub(crate) const LABELS: [&str; 3] = ["find.name", "find.dir", "find.text"];
 /// `Find::focus` value of the result list (the inputs are 0..3).
 pub(crate) const LIST: usize = 3;
 /// Repaint interval while searching (the folder count grows).
@@ -147,7 +148,7 @@ impl App {
         f.searched = true;
         let root = parse_path(&f.inputs[1].text, &base);
         let Some(root) = root.filter(|r| r.is_dir()) else {
-            f.error = Some(format!("Ordner nicht gefunden: {}", f.inputs[1].string()));
+            f.error = Some(tf("find.dir_not_found", &[("dir", &f.inputs[1].string())]));
             return;
         };
         f.error = None;

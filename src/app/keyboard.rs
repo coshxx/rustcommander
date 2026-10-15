@@ -6,6 +6,7 @@ use crate::app::dialogs::DialogKind;
 use crate::app::{App, Mode};
 use crate::files::names::fold_case;
 use crate::files::sort::SortKey;
+use crate::i18n::{Lang, t};
 use crate::ops::Answer;
 use crate::sys::win;
 
@@ -52,16 +53,30 @@ impl App {
                 }
                 _ => d.input.as_mut().is_some_and(|i| i.key(vk, ctrl, hwnd)),
             },
-            Mode::Options { sel } => {
-                let n = crate::app::options::LABELS.len();
+            Mode::Options { sel, popup: Some(p) } => {
+                let n = Lang::ALL.len();
+                match vk {
+                    VK_UP => *p = p.saturating_sub(1),
+                    VK_DOWN => *p = (*p + 1).min(n - 1),
+                    VK_SPACE | VK_RETURN => {
+                        let lang = Lang::ALL[*p];
+                        self.choose_language(lang);
+                    }
+                    VK_ESCAPE => self.mode = Mode::Options { sel: *sel, popup: None },
+                    _ => return false,
+                }
+                true
+            }
+            Mode::Options { sel, popup: None } => {
+                let n = crate::app::options::ROWS;
                 match vk {
                     VK_UP => *sel = sel.saturating_sub(1),
                     VK_DOWN => *sel = (*sel + 1).min(n - 1),
                     VK_HOME => *sel = 0,
                     VK_END => *sel = n - 1,
                     VK_SPACE | VK_RETURN => {
-                        let i = *sel;
-                        self.toggle_option(i);
+                        let row = *sel;
+                        self.activate_option(row);
                     }
                     VK_ESCAPE => self.mode = Mode::Normal,
                     _ => return false,
@@ -202,6 +217,8 @@ impl App {
             VK_F5 if ctrl => self.sort_by(a, SortKey::Date),
             VK_F6 if ctrl => self.sort_by(a, SortKey::Size),
             VK_F3 => self.view_current(),
+            VK_F4 if shift => self.open_dialog(DialogKind::NewFile),
+            VK_F4 => self.edit_current(),
             VK_F5 => self.open_dialog(DialogKind::Copy),
             VK_F6 if shift => self.open_dialog(DialogKind::Rename),
             VK_F6 => self.open_dialog(DialogKind::Move),
@@ -261,12 +278,17 @@ impl App {
             }
             Mode::Options { .. } => {}
             Mode::Find => self.find_char(c),
-            Mode::Conflict(_) => match char::from_u32(fold_case(c)) {
-                Some('s') => self.answer_conflict(Answer::Skip),
-                Some('a') => self.answer_conflict(Answer::OverwriteAll),
-                Some('k') => self.answer_conflict(Answer::SkipAll),
-                _ => {}
-            },
+            Mode::Conflict(_) => {
+                // The answer keys are translated (German "K" = keine, English "N" = none).
+                let is = |key: &str| t(key).encode_utf16().next().is_some_and(|k| fold_case(k) == fold_case(c));
+                if is("conflict.skip_key") {
+                    self.answer_conflict(Answer::Skip);
+                } else if is("conflict.all_key") {
+                    self.answer_conflict(Answer::OverwriteAll);
+                } else if is("conflict.none_key") {
+                    self.answer_conflict(Answer::SkipAll);
+                }
+            }
             Mode::Normal => {
                 let a = self.active;
                 let p = &mut self.panels[a];

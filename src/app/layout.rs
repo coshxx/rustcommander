@@ -22,10 +22,19 @@ const POPUP_W: f32 = 230.0;
 const OPTIONS_W: f32 = 460.0;
 pub(crate) const OPTION_H: f32 = 32.0;
 pub(crate) const OPTIONS_ROWS_Y: f32 = 56.0;
+/// Width of the language list in the options dialog.
+const LANGUAGE_POPUP_W: f32 = 180.0;
 pub(crate) const CARD_W: f32 = 400.0;
+/// Gear button at the right end of the key bar (opens the options).
+pub(crate) const GEAR_W: f32 = 34.0;
 /// Width of the scrollbar's mouse zone at the panel's right edge.
 const SCROLL_ZONE_W: f32 = 14.0;
 const THUMB_MIN_H: f32 = 24.0;
+
+/// The gear button in the key bar.
+pub(crate) fn gear_rect(w: f32, h: f32) -> Rect {
+    rect(w - GEAR_W - 6.0, h - KEYBAR_H + 4.0, GEAR_W, KEYBAR_H - 8.0)
+}
 
 /// What is under the mouse.
 pub(crate) enum Hit {
@@ -42,6 +51,8 @@ pub(crate) enum Hit {
     Panel(usize),
     /// Entry of the drive popup.
     Popup(usize),
+    /// Gear button in the key bar.
+    Gear,
     Nothing,
 }
 
@@ -110,7 +121,8 @@ impl App {
             }
         }
         if y >= h - KEYBAR_H {
-            return Hit::Nothing;
+            let g = gear_rect(w, h);
+            return if x >= g.left && x < g.right { Hit::Gear } else { Hit::Nothing };
         }
         let p = if x < self.panel_x(1, w).0 { 0 } else { 1 };
         let (px, _) = self.panel_x(p, w);
@@ -182,7 +194,7 @@ impl App {
     /// The options dialog card in a `w` × `h` window: title, one row per option, key chips.
     pub(crate) fn options_rect(w: f32, h: f32) -> Rect {
         let dw = (w - 48.0).clamp(200.0, OPTIONS_W);
-        let dh = OPTIONS_ROWS_Y + OPTION_H * crate::app::options::LABELS.len() as f32 + 52.0;
+        let dh = OPTIONS_ROWS_Y + OPTION_H * crate::app::options::ROWS as f32 + 52.0;
         rect(((w - dw) / 2.0).floor(), ((h - dh) / 2.5).floor(), dw, dh)
     }
 
@@ -195,7 +207,23 @@ impl App {
             return None;
         }
         let row = (y - r.top - OPTIONS_ROWS_Y) / OPTION_H;
-        Some((row >= 0.0 && (row as usize) < crate::app::options::LABELS.len()).then_some(row as usize))
+        Some((row >= 0.0 && (row as usize) < crate::app::options::ROWS).then_some(row as usize))
+    }
+
+    /// The language list below the language row, right-aligned in the options card.
+    pub(crate) fn language_popup_rect(w: f32, h: f32) -> Rect {
+        let r = Self::options_rect(w, h);
+        let n = crate::i18n::Lang::ALL.len() as f32;
+        let top = r.top + OPTIONS_ROWS_Y + (crate::app::options::LANGUAGE_ROW as f32 + 1.0) * OPTION_H;
+        rect(r.right - 20.0 - LANGUAGE_POPUP_W, top, LANGUAGE_POPUP_W, n * ROW_H + 8.0)
+    }
+
+    /// Entry of the open language list at (`x`, `y`).
+    pub(crate) fn language_at(&self, x: f32, y: f32) -> Option<usize> {
+        let (w, h) = self.gfx.size_dips(self.hwnd);
+        let r = Self::language_popup_rect(w, h);
+        let inside = x >= r.left && x < r.right && y >= r.top + 4.0 && y < r.bottom - 4.0;
+        inside.then(|| ((y - r.top - 4.0) / ROW_H) as usize).filter(|&i| i < crate::i18n::Lang::ALL.len())
     }
 
     /// Drive popup below the drive chip of a panel at `px`.

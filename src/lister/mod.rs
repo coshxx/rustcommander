@@ -11,6 +11,7 @@ pub(crate) mod search;
 pub(crate) mod text;
 mod window;
 
+use crate::i18n::{t, tf};
 use std::sync::mpsc::TryRecvError;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
@@ -26,7 +27,7 @@ use crate::sys::mapped::MappedFile;
 use crate::sys::win::{self, SendHwnd};
 use crate::theme::{DARK, Theme};
 
-pub use window::{close_all, open};
+pub use window::{close_all, open, repaint_all};
 
 /// Posted to a lister window by its search thread (progress and result).
 const WM_APP_SEARCH: u32 = WM_APP + 1;
@@ -307,7 +308,7 @@ impl Lister {
                 self.running = Some(search::start(self.file.clone(), pattern, from, forward, (base, len), notify));
                 self.message = None;
             }
-            _ => self.message = Some(format!("„{term}“ nicht gefunden")),
+            _ => self.message = Some(tf("lister.not_found", &[("term", &term)])),
         }
     }
 
@@ -322,8 +323,8 @@ impl Lister {
                             self.hit = Some((s, e));
                             self.show(s);
                         }
-                        Outcome::NotFound => self.message = Some(format!("„{}“ nicht gefunden", shared().term)),
-                        Outcome::Cancelled => self.message = Some("Suche abgebrochen".into()),
+                        Outcome::NotFound => self.message = Some(tf("lister.not_found", &[("term", &shared().term)])),
+                        Outcome::Cancelled => self.message = Some(t("lister.search_cancelled").into()),
                     }
                 }
                 Err(TryRecvError::Empty) => {}

@@ -10,14 +10,17 @@ use crate::sys::win;
 const SIZES_REPAINT_MS: u32 = 100;
 
 impl App {
-    /// Space: toggle the mark, count the size if it is a folder, move down.
+    /// Space: toggle the mark, count the size if it is a folder, move down (unless the
+    /// `space_stays` option is on).
     pub(crate) fn space(&mut self) {
         let a = self.active;
         let p = &mut self.panels[a];
         p.toggle_mark();
         let cursor = p.cursor;
         p.count_size(cursor, &self.sink);
-        p.move_cursor(1);
+        if !self.options.space_stays {
+            p.move_cursor(1);
+        }
         self.arm_sizes_timer();
     }
 

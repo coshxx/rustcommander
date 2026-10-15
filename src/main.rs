@@ -8,6 +8,7 @@
 mod app;
 mod config;
 mod files;
+mod i18n;
 mod lister;
 mod ops;
 mod panel;
@@ -47,6 +48,7 @@ fn main() {
         let _ = OleInitialize(None);
     }
     let cfg = Config::load();
+    i18n::set(cfg.options.language.unwrap_or_else(i18n::detect));
     lister::set_settings(cfg.lister.clone());
     let hwnd = create_window();
     timing.mark("window created");

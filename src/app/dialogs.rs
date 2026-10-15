@@ -1,5 +1,5 @@
 //! Modal interactions: drive popup, path editing and the small dialogs
-//! (copy, move, delete, rename, new directory, mark by mask).
+//! (copy, move, delete, rename, new directory, new file, mark by mask).
 
 use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
@@ -10,11 +10,9 @@ use crate::app::{App, Mode, Tone};
 use crate::files::listing::Kind;
 use crate::files::mask::Mask;
 use crate::files::names::fold_case;
+use crate::i18n::{t, tf};
 use crate::ops::Job;
 use crate::sys::win::{self, Drive};
-
-/// Shown when something would write into an archive.
-const READ_ONLY: &str = "Archive sind schreibgeschützt";
 
 pub(crate) struct DrivePopup {
     pub(crate) panel: usize,
@@ -33,6 +31,8 @@ pub(crate) enum DialogKind {
     },
     Rename,
     MkDir,
+    /// Shift+F4: create a file (unless it exists) and open it in the editor.
+    NewFile,
     /// Mark (`add`) or unmark entries by file mask.
     Select {
         add: bool,
@@ -41,17 +41,18 @@ pub(crate) enum DialogKind {
 
 impl DialogKind {
     pub(crate) fn title(self) -> &'static str {
-        match self {
-            DialogKind::Copy => "Kopieren",
-            DialogKind::Extract => "Entpacken",
-            DialogKind::Move => "Verschieben",
-            DialogKind::Delete { recycle: true } => "In den Papierkorb",
-            DialogKind::Delete { recycle: false } => "Endgültig löschen",
-            DialogKind::Rename => "Umbenennen",
-            DialogKind::MkDir => "Neuer Ordner",
-            DialogKind::Select { add: true } => "Markieren",
-            DialogKind::Select { add: false } => "Markierung aufheben",
-        }
+        t(match self {
+            DialogKind::Copy => "dialog.copy",
+            DialogKind::Extract => "dialog.extract",
+            DialogKind::Move => "dialog.move",
+            DialogKind::Delete { recycle: true } => "dialog.recycle",
+            DialogKind::Delete { recycle: false } => "dialog.delete",
+            DialogKind::Rename => "dialog.rename",
+            DialogKind::MkDir => "dialog.mkdir",
+            DialogKind::NewFile => "dialog.edit",
+            DialogKind::Select { add: true } => "dialog.mark",
+            DialogKind::Select { add: false } => "dialog.unmark",
+        })
     }
 }
 
@@ -105,17 +106,21 @@ impl App {
     /// Open a dialog for the marked entries (or the one under the cursor).
     pub(crate) fn open_dialog(&mut self, kind: DialogKind) {
         if self.job.is_some() && !matches!(kind, DialogKind::Select { .. }) {
-            self.notify("Es läuft bereits ein Vorgang".into(), Tone::Error);
+            self.notify(t("notice.job_running").into(), Tone::Error);
             return;
         }
         let a = self.active;
         // Archives are read-only: copying out of one extracts, everything that writes is refused.
         let kind = match kind {
             DialogKind::Copy if self.panels[a].archive.is_some() => DialogKind::Extract,
-            DialogKind::Move | DialogKind::Delete { .. } | DialogKind::Rename | DialogKind::MkDir
+            DialogKind::Move
+            | DialogKind::Delete { .. }
+            | DialogKind::Rename
+            | DialogKind::MkDir
+            | DialogKind::NewFile
                 if self.panels[a].archive.is_some() =>
             {
-                self.notify(READ_ONLY.into(), Tone::Info);
+                self.notify(t("notice.read_only").into(), Tone::Info);
                 return;
             }
             _ => kind,
@@ -128,21 +133,18 @@ impl App {
                 if !dest.ends_with('\\') {
                     dest.push('\\');
                 }
-                let verb = match kind {
-                    DialogKind::Copy => "kopieren",
-                    DialogKind::Extract => "entpacken",
-                    _ => "verschieben",
+                let key = match kind {
+                    DialogKind::Copy => "dialog.copy_to",
+                    DialogKind::Extract => "dialog.extract_to",
+                    _ => "dialog.move_to",
                 };
-                let msg = format!("{} {verb} nach:", describe(&sources));
+                let msg = tf(key, &[("what", &describe(&sources))]);
                 (sources, msg, Some(TextInput::new(utf16(&dest))))
             }
             DialogKind::Delete { recycle } => {
                 let sources = p.targets();
-                let msg = if recycle {
-                    format!("{} in den Papierkorb verschieben?", describe(&sources))
-                } else {
-                    format!("{} endgültig löschen? Das lässt sich nicht rückgängig machen.", describe(&sources))
-                };
+                let key = if recycle { "dialog.recycle_question" } else { "dialog.delete_question" };
+                let msg = tf(key, &[("what", &describe(&sources))]);
                 (sources, msg, None)
             }
             DialogKind::Rename => {
@@ -153,19 +155,24 @@ impl App {
                     Some(dot) if dot > 0 && !e.is_dir() => dot,
                     _ => name.len(),
                 };
-                let msg = format!("„{}“ umbenennen in:", String::from_utf16_lossy(&name));
+                let msg = tf("dialog.rename_to", &[("name", &String::from_utf16_lossy(&name))]);
                 (vec![p.dir.join(e.os_name())], msg, Some(TextInput { text: name, caret, all: false }))
             }
             DialogKind::MkDir => {
-                let msg = format!("Neuer Ordner in {}:", p.dir.display());
+                let msg = tf("dialog.mkdir_in", &[("dir", &p.dir.display())]);
                 (Vec::new(), msg, Some(TextInput::new(Vec::new())))
             }
+            DialogKind::NewFile => {
+                let msg = tf("dialog.edit_in", &[("dir", &p.dir.display())]);
+                let name = p.current().filter(|e| !e.is_dir()).map(|e| e.name.to_vec()).unwrap_or_default();
+                (Vec::new(), msg, Some(TextInput::selected(name)))
+            }
             DialogKind::Select { .. } => {
-                let msg = "Maske, z. B. *.bmp;*.png · Ordner: \\ am Ende · | schließt aus".to_string();
+                let msg = t("dialog.mask_hint").to_string();
                 (Vec::new(), msg, Some(TextInput::selected(utf16(&self.mask))))
             }
         };
-        if sources.is_empty() && !matches!(kind, DialogKind::MkDir | DialogKind::Select { .. }) {
+        if sources.is_empty() && !matches!(kind, DialogKind::MkDir | DialogKind::NewFile | DialogKind::Select { .. }) {
             return;
         }
         self.panels[a].search.clear();
@@ -181,12 +188,16 @@ impl App {
             self.apply_mask(d.panel, input, add);
             return;
         }
+        if d.kind == DialogKind::NewFile {
+            self.new_file(d.panel, input);
+            return;
+        }
         let job = match d.kind {
-            DialogKind::Select { .. } => return,
+            DialogKind::Select { .. } | DialogKind::NewFile => return,
             DialogKind::Copy | DialogKind::Extract | DialogKind::Move => {
                 let Some(dest) = parse_path(&utf16(&input), &dir) else { return };
                 if self.panels.iter().any(|p| p.archive.as_ref().is_some_and(|a| dest.starts_with(a))) {
-                    self.notify(READ_ONLY.into(), Tone::Info);
+                    self.notify(t("notice.read_only").into(), Tone::Info);
                     return;
                 }
                 match d.kind {
@@ -202,14 +213,14 @@ impl App {
                     return;
                 }
                 if !valid_name(&input, false) {
-                    self.notify(format!("Ungültiger Name: „{input}“"), Tone::Error);
+                    self.notify(tf("notice.invalid_name", &[("name", &input)]), Tone::Error);
                     return;
                 }
                 Job::Rename { from, to: input.into() }
             }
             DialogKind::MkDir => {
                 if !valid_name(&input, true) {
-                    self.notify(format!("Ungültiger Name: „{input}“"), Tone::Error);
+                    self.notify(tf("notice.invalid_name", &[("name", &input)]), Tone::Error);
                     return;
                 }
                 Job::MkDir { path: dir.join(&input) }
@@ -218,12 +229,35 @@ impl App {
         self.start_job(job, d.kind.title(), d.panel);
     }
 
+    /// Shift+F4: create `name` in the panel's directory if it doesn't exist, put the cursor on it
+    /// and open it in the editor.
+    fn new_file(&mut self, panel: usize, name: String) {
+        if !valid_name(&name, false) {
+            self.notify(tf("notice.invalid_name", &[("name", &name)]), Tone::Error);
+            return;
+        }
+        let dir = self.panels[panel].dir.clone();
+        let path = dir.join(&name);
+        if !path.exists()
+            && let Err(e) = std::fs::OpenOptions::new().write(true).create_new(true).open(&path)
+        {
+            self.notify(tf("notice.cannot_create", &[("name", &name), ("error", &e)]), Tone::Error);
+            return;
+        }
+        if path.is_dir() {
+            self.notify(tf("notice.is_folder", &[("name", &name)]), Tone::Error);
+            return;
+        }
+        self.navigate(panel, dir, Some(utf16(&name).into()));
+        self.edit(&path);
+    }
+
     /// Mark (`add`) or unmark all entries of `panel` that match `input`.
     fn apply_mask(&mut self, panel: usize, input: String, add: bool) {
         let mask = Mask::parse(&input);
         let n = self.panels[panel].mark_where(add, |e| mask.matches(&e.name, e.is_dir()));
         if n == 0 {
-            self.notify(format!("Keine Treffer für „{input}“"), Tone::Info);
+            self.notify(tf("notice.no_matches", &[("mask", &input)]), Tone::Info);
         }
         if !input.is_empty() {
             self.mask = input;

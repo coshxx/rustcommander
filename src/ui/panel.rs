@@ -6,6 +6,7 @@ use crate::app::mouse::Drag;
 use crate::app::{App, LOADING_DELAY_MS, Mode};
 use crate::files::listing::{Entry, Kind};
 use crate::files::sort::SortKey;
+use crate::i18n::{self, tf, tn};
 use crate::panel::Panel;
 use crate::sys::gfx::{Canvas, rect};
 use crate::theme::{Color, Theme};
@@ -82,7 +83,7 @@ impl App {
                 c.text_str(s, &f.path, r, if a.active { t.text } else { t.text_dim });
                 if loading {
                     c.text_str(
-                        "lädt …",
+                        i18n::t("panel.loading"),
                         &f.small_right,
                         rect(x + pw - PAD - right_w, 0.0, right_w, PATH_H - 2.0),
                         t.accent,
@@ -99,9 +100,9 @@ impl App {
         let y = PATH_H;
         let sort = a.panel.sort;
         let headers = [
-            (SortKey::Name, "Name", cols.name_x, cols.size_x - cols.name_x - 8.0, false),
-            (SortKey::Size, "Größe", cols.size_x, cols.size_w, true),
-            (SortKey::Date, "Geändert", cols.date_x, DATE_W, false),
+            (SortKey::Name, i18n::t("panel.name"), cols.name_x, cols.size_x - cols.name_x - 8.0, false),
+            (SortKey::Size, i18n::t("panel.size"), cols.size_x, cols.size_w, true),
+            (SortKey::Date, i18n::t("panel.modified"), cols.date_x, DATE_W, false),
         ];
         for (key, label, x, w, right) in headers {
             if self.hover_header == Some((a.index, key)) {
@@ -168,7 +169,7 @@ impl App {
                     let text = if s.incomplete() { format!("≥ {text}") } else { text };
                     c.text_str(&text, &f.right, size_rect, if s.done() { dim } else { t.accent });
                 }
-                None => c.text_str("Ordner", &f.small_right, size_rect, dim),
+                None => c.text_str(i18n::t("common.folder"), &f.small_right, size_rect, dim),
             },
             _ => {
                 c.text_str(&self.size_text(e.size), &f.right, size_rect, if e.hidden && !e.marked { tcol } else { dim })
@@ -226,11 +227,12 @@ impl App {
         match &p.error {
             Some(err) => c.text_str(err, &f.small, sr, t.error),
             None if marked > 0 => {
-                let s = format!("{marked} markiert  ·  {}", self.size_text(marked_bytes));
+                let s = tf("panel.marked", &[("n", &marked), ("size", &self.size_text(marked_bytes))]);
                 c.text_str(&s, &f.small, sr, t.marked);
             }
             None => {
-                let s = format!("{} Ordner  ·  {} Dateien  ·  {}", p.dirs, p.files, self.size_text(p.bytes));
+                let s = [tn("panel.dirs", p.dirs as u64), tn("panel.files", p.files as u64), self.size_text(p.bytes)]
+                    .join("  ·  ");
                 c.text_str(&s, &f.small, sr, t.text_dim);
             }
         }
