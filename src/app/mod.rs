@@ -3,6 +3,7 @@
 //! sibling modules and in `crate::ui`; they all extend `App` with more methods.
 
 pub(crate) mod dialogs;
+pub(crate) mod find;
 pub(crate) mod format;
 pub(crate) mod jobs;
 mod keyboard;
@@ -44,6 +45,8 @@ pub const WM_APP_DIRCHANGED: u32 = WM_APP + 3;
 pub const WM_APP_VIEW: u32 = WM_APP + 4;
 /// Posted to itself: show the shell context menu of `App::context_request`.
 pub const WM_APP_CONTEXT: u32 = WM_APP + 6;
+/// Posted by the file search when there are new hits or it has ended.
+pub const WM_APP_FIND: u32 = WM_APP + 7;
 
 // Timer IDs (`WM_TIMER`).
 const TIMER_LOADING: usize = 1;
@@ -56,6 +59,8 @@ pub(crate) const TIMER_DRAG: usize = 6;
 const TIMER_SIZES: usize = 7;
 /// Right button held this long on a row: shell context menu instead of marking.
 pub(crate) const TIMER_LONG_PRESS: usize = 8;
+/// Repaint while a file search runs.
+pub(crate) const TIMER_FIND: usize = 9;
 
 /// Directory change notifications trigger at most one reload per this interval.
 const REFRESH_THROTTLE_MS: u32 = 250;
@@ -74,6 +79,8 @@ pub(crate) enum Mode {
     Conflict(PathBuf),
     /// The options dialog (Ctrl+,); `sel` = highlighted option.
     Options { sel: usize },
+    /// The search dialog (Alt+F7); its state is `App::find`.
+    Find,
 }
 
 /// Color and icon of a notice.
@@ -138,6 +145,8 @@ pub struct App {
     pub(crate) view_requests: Vec<PathBuf>,
     /// Shell context menu to open; shown by `window.rs` on `WM_APP_CONTEXT`.
     pub(crate) context_request: Option<ContextRequest>,
+    /// The last file search (kept when the dialog is closed).
+    pub(crate) find: Option<find::Find>,
     /// For `--timing`: the first frame / the first frame with both panels loaded was drawn.
     pub(crate) painted: bool,
     pub(crate) painted_content: bool,
@@ -183,6 +192,7 @@ impl App {
             swallow_next_char: false,
             view_requests: Vec::new(),
             context_request: None,
+            find: None,
             painted: false,
             painted_content: false,
         };
@@ -297,6 +307,7 @@ impl App {
             }
             TIMER_SIZES => self.arm_sizes_timer(),
             TIMER_LONG_PRESS => self.long_press(),
+            TIMER_FIND => self.find_tick(),
             _ if TIMER_REFRESH.contains(&id) => {
                 let i = if id == TIMER_REFRESH[0] { 0 } else { 1 };
                 self.refresh_armed[i] = false;

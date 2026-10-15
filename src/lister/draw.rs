@@ -88,7 +88,7 @@ impl Lister {
             draw_card(&c, t, r);
             let (x, iw) = (r.left + 20.0, dw - 40.0);
             c.text_str("Suchen", &c.fonts.path, rect(x, r.top + 16.0, iw, 28.0), t.text);
-            draw_input(&c, &self.gfx, t, rect(x, r.top + 50.0, iw, 32.0), input, cx);
+            draw_input(&c, &self.gfx, t, rect(x, r.top + 50.0, iw, 32.0), input, Some(cx));
             let case = if shared().match_case { "Groß/klein beachten" } else { "Groß/klein egal" };
             let chips = [("Enter", "Suchen"), ("Alt+G", case), ("Esc", "Abbrechen")];
             draw_chips(&c, &self.gfx, t, x, r.top + 94.0, 28.0, &chips);

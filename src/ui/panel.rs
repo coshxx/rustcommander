@@ -48,7 +48,7 @@ impl App {
     }
 
     /// Rounded (`1,2 GB`) or, with the option, exact (`1.288.490.188`).
-    fn size_text(&self, bytes: u64) -> String {
+    pub(crate) fn size_text(&self, bytes: u64) -> String {
         if self.options.exact_sizes { format_bytes(bytes) } else { format_size(bytes) }
     }
 
@@ -73,7 +73,7 @@ impl App {
         match (&self.mode, caret_x) {
             (Mode::PathEdit { panel, input }, Some(cx)) if *panel == a.index => {
                 let r = rect(path_x - 6.0, 6.0, x + pw - PAD - path_x + 6.0, PATH_H - 14.0);
-                draw_input(c, &self.gfx, self.theme, r, input, cx);
+                draw_input(c, &self.gfx, self.theme, r, input, Some(cx));
             }
             _ => {
                 let r = rect(path_x, 0.0, x + pw - PAD - path_x - right_w, PATH_H - 2.0);

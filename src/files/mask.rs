@@ -95,6 +95,20 @@ impl Mask {
         let hit = |ps: &[Pattern]| ps.iter().any(|p| p.dirs == is_dir && glob(&p.chars, &name));
         hit(&self.include) && !hit(&self.exclude)
     }
+
+    /// File search (Alt+F7): masks without `\` find folders as well, masks with `\` only
+    /// folders. Excludes stay as they are (`*.bak` files, `target\` folders).
+    pub fn finds(&self, name: &[u16], is_dir: bool) -> bool {
+        let name: Vec<u32> = name.iter().map(|&c| fold_case(c)).collect();
+        let include = self.include.iter().any(|p| (is_dir || !p.dirs) && glob(&p.chars, &name));
+        include && !self.exclude.iter().any(|p| p.dirs == is_dir && glob(&p.chars, &name))
+    }
+
+    /// An excluded folder (`| target\`): the file search doesn't look inside.
+    pub fn excludes_dir(&self, name: &[u16]) -> bool {
+        let name: Vec<u32> = name.iter().map(|&c| fold_case(c)).collect();
+        self.exclude.iter().any(|p| p.dirs && glob(&p.chars, &name))
+    }
 }
 
 #[cfg(test)]
@@ -107,6 +121,19 @@ mod tests {
 
     fn d(mask: &str, name: &str) -> bool {
         Mask::parse(mask).matches(&name.encode_utf16().collect::<Vec<_>>(), true)
+    }
+
+    #[test]
+    fn search_masks() {
+        let w = |s: &str| s.encode_utf16().collect::<Vec<_>>();
+        let mask = Mask::parse("foto | *.bak target\\");
+        assert!(mask.finds(&w("Fotos"), true));
+        assert!(mask.finds(&w("foto1.jpg"), false));
+        assert!(!mask.finds(&w("foto.bak"), false));
+        assert!(mask.finds(&w("foto.bak"), true));
+        assert!(mask.excludes_dir(&w("Target")));
+        assert!(!mask.excludes_dir(&w("src")));
+        assert!(!Mask::parse("src\\").finds(&w("src"), false));
     }
 
     #[test]

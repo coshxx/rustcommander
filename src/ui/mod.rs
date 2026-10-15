@@ -1,5 +1,6 @@
 //! Drawing. Everything is redrawn on every `WM_PAINT`; only visible rows are drawn.
 
+mod find;
 mod overlays;
 mod panel;
 pub(crate) mod widgets;
@@ -41,6 +42,7 @@ impl App {
         let input = match &self.mode {
             Mode::PathEdit { input, .. } => Some(input),
             Mode::Dialog(d) => d.input.as_ref(),
+            Mode::Find => self.find.as_ref().and_then(|f| f.inputs.get(f.focus)),
             _ => None,
         };
         let caret_x = input.map(|i| self.gfx.caret_x(&i.text[..i.caret]));
@@ -56,6 +58,7 @@ impl App {
             Mode::Dialog(d) => self.draw_dialog(&c, d, w, h, caret_x),
             Mode::Conflict(path) => self.draw_conflict(&c, path, w, h),
             Mode::Options { sel } => self.draw_options(&c, *sel, w, h),
+            Mode::Find => self.draw_find(&c, w, h, caret_x),
             _ => {}
         }
         self.gfx.end();

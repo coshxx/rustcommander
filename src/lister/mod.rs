@@ -7,8 +7,8 @@
 
 mod draw;
 mod input;
-mod search;
-mod text;
+pub(crate) mod search;
+pub(crate) mod text;
 mod window;
 
 use std::sync::mpsc::TryRecvError;
@@ -69,7 +69,7 @@ pub fn set_settings(settings: Settings) {
     shared().settings = settings;
 }
 
-fn code_pages() -> &'static CodePages {
+pub(crate) fn code_pages() -> &'static CodePages {
     static PAGES: OnceLock<CodePages> = OnceLock::new();
     PAGES.get_or_init(|| CodePages { ansi: win::code_page(false), oem: win::code_page(true) })
 }

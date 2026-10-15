@@ -29,6 +29,7 @@ thread touches.
 | `app/mod.rs` | `App` struct, `Mode` (normal / dialog / popup …), timers, directory load results. |
 | `app/keyboard.rs`, `app/mouse.rs` | Input handling. |
 | `app/dialogs.rs` | Dialogs, drive popup, path editing, mark by mask. |
+| `app/find.rs` | Search dialog (Alt+F7): fields, hits, keys; the last search is kept in `App::find`. |
 | `app/options.rs` | Options dialog (Ctrl+,): the list of switches; toggling saves the config. |
 | `app/jobs.rs` | Starting file operations and handling their progress, conflicts and results. |
 | `app/layout.rs` | Sizes (DIPs), panel geometry, hit-testing, scrollbar geometry. |
@@ -36,7 +37,7 @@ thread touches.
 | `app/format.rs` | Pure helpers: size/date formatting, name checks, path parsing. |
 | `ui/` | Drawing only – reads `App`, never changes it. `paint()` redraws the whole window. |
 | `panel.rs` | One file list: directory, entries, cursor, scroll position, marks, quick search. |
-| `files/` | Files, but not operations on them: listing directories (`listing`), folder sizes (`dirsize`), sort order (`sort`, pure and tested), archives as read-only directories (`archive`), UTF-16 names and natural sort (`names`), marking masks (`mask`), change notifications (`watch`), temp files for opening entries of archives (`temp`). |
+| `files/` | Files, but not operations on them: listing directories (`listing`), file search (`find`), folder sizes and the shared directory reader `scan` (`dirsize`), sort order (`sort`, pure and tested), archives as read-only directories (`archive`), UTF-16 names and natural sort (`names`), marking masks (`mask`), change notifications (`watch`), temp files for opening entries of archives (`temp`). |
 | `ops/` | File operations on a worker thread: `copy`, `moving`, `delete`, `extract` (from archives); `mod.rs` holds the public API (`Job`, `Handle`, `Event`) and the shared worker logic. |
 | `lister/` | The F3 viewer: its own windows (`window`), state and commands (`mod.rs`), input, drawing, the byte → screen line logic (`text`, pure and tested) and the search (`search`). |
 | `sys/` | Thin safe wrappers around Win32 (`win`), Direct2D/DirectWrite (`gfx`), libarchive from Windows' `archiveint.dll` (`libarchive`), memory-mapped files (`mapped`) and the shell context menu (`shell_menu`). |
@@ -53,6 +54,7 @@ thread touches.
 | Directory loader (one per load) | `Panel::navigate` / `reload` | `WM_APP_LOADED` + channel | `App::on_loaded` → `Panel::apply` |
 | File operation worker | `App::start_job` → `ops::start` | `WM_APP_JOB` + channel | `App::on_job_event` |
 | Directory watcher (one per panel) | `App::on_loaded` | `WM_APP_DIRCHANGED` (wParam = panel) | `App::on_dir_changed` → throttled reload |
+| File search workers (one set per search) | `App::start_find` → `find::start` | `WM_APP_FIND` (at most one pending) + channel of hit batches; `TIMER_FIND` repaints the folder count | `App::on_find_event` |
 | Folder size workers (a pool, started on first use) | `Panel::count_size` → `dirsize::start` | `WM_APP_SIZE` when a count is done; live numbers are atomics, repainted by `TIMER_SIZES` | `App::on_size_done` |
 | Shell open | `win::shell_open` | – | – |
 | Temp cleanup (once) | `main` (`files::temp::sweep_old`) | – | – |
