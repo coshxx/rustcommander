@@ -10,6 +10,7 @@ mod keyboard;
 pub(crate) mod layout;
 pub(crate) mod mouse;
 pub(crate) mod options;
+pub(crate) mod rename;
 mod sizes;
 pub(crate) mod text_input;
 
@@ -23,6 +24,7 @@ use crate::app::dialogs::{Dialog, DrivePopup};
 use crate::app::jobs::{AfterJob, RunningJob};
 use crate::app::layout::ROW_H;
 use crate::app::mouse::Drag;
+use crate::app::rename::{InlineRename, PendingRename};
 use crate::app::text_input::TextInput;
 use crate::config::{Config, Options};
 use crate::files::archive::is_archive_name;
@@ -62,6 +64,8 @@ const TIMER_SIZES: usize = 7;
 pub(crate) const TIMER_LONG_PRESS: usize = 8;
 /// Repaint while a file search runs.
 pub(crate) const TIMER_FIND: usize = 9;
+/// A slow second click on the name under the cursor starts renaming after the double-click time.
+pub(crate) const TIMER_RENAME: usize = 10;
 
 /// Directory change notifications trigger at most one reload per this interval.
 const REFRESH_THROTTLE_MS: u32 = 250;
@@ -83,6 +87,8 @@ pub(crate) enum Mode {
     Options { sel: usize, popup: Option<usize> },
     /// The search dialog (Alt+F7); its state is `App::find`.
     Find,
+    /// Renaming an entry in place (slow second click on its name).
+    Rename(InlineRename),
 }
 
 /// Color and icon of a notice.
@@ -139,6 +145,11 @@ pub struct App {
     pub(crate) hover_header: Option<(usize, SortKey)>,
     /// Mouse over the gear button in the key bar.
     pub(crate) hover_gear: bool,
+    /// A click that may start an inline rename (see `rename.rs`).
+    pub(crate) pending_rename: Option<PendingRename>,
+    /// Time, panel and row of the last left click on a row (double clicks are told apart from
+    /// slow second clicks by this, see `rename.rs`).
+    pub(crate) last_click: Option<(std::time::Instant, usize, usize)>,
     /// Last mask used for Num+ / Num−.
     pub(crate) mask: String,
     /// Program for F4 (from config.json; Notepad by default).
@@ -194,6 +205,8 @@ impl App {
             hover_bar: None,
             hover_header: None,
             hover_gear: false,
+            pending_rename: None,
+            last_click: None,
             mask: cfg.mask.clone().unwrap_or_else(|| "*.*".into()),
             editor: cfg.editor.clone().unwrap_or_else(|| crate::config::DEFAULT_EDITOR.into()),
             options: cfg.options,
@@ -276,6 +289,7 @@ impl App {
                         let dir = panel.archive.as_deref().and_then(Path::parent).unwrap_or(&panel.dir);
                         self.panels[p].watcher = Watcher::new(dir, SendHwnd::new(self.hwnd), WM_APP_DIRCHANGED, p);
                     }
+                    self.follow_rename(p);
                 }
                 Applied::Failed { path } => {
                     let dir = self.panels[p].dir.clone();
@@ -317,6 +331,7 @@ impl App {
             TIMER_SIZES => self.arm_sizes_timer(),
             TIMER_LONG_PRESS => self.long_press(),
             TIMER_FIND => self.find_tick(),
+            TIMER_RENAME => self.rename_tick(),
             _ if TIMER_REFRESH.contains(&id) => {
                 let i = if id == TIMER_REFRESH[0] { 0 } else { 1 };
                 self.refresh_armed[i] = false;

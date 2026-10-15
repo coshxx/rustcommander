@@ -253,6 +253,11 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
         // Alt+Shift+Enter would beep otherwise (no menu to handle the character).
         WM_SYSCHAR if wp.0 == 0x0D => LRESULT(0),
         WM_SYSCHAR => done(cell.with(|app| app.on_syschar(wp.0 as u16))),
+        // Another window took the focus: an inline rename is completed, like in Explorer.
+        WM_KILLFOCUS => {
+            cell.with(|app| app.on_focus_lost());
+            unsafe { DefWindowProcW(hwnd, msg, wp, lp) }
+        }
         panel::WM_APP_SIZE => {
             cell.with(|app| app.on_size_done());
             LRESULT(0)

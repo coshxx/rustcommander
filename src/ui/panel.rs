@@ -43,7 +43,7 @@ impl App {
         let cols = self.columns(i, w);
         self.draw_path_bar(c, &a, caret_x);
         self.draw_column_headers(c, &a, &cols);
-        self.draw_rows(c, &a, &cols, h);
+        self.draw_rows(c, &a, &cols, h, caret_x);
         self.draw_scrollbar(c, &a, w, h);
         self.draw_status_bar(c, &a, h);
     }
@@ -124,19 +124,20 @@ impl App {
     }
 
     /// Only the visible rows (plus one partially visible) are drawn.
-    fn draw_rows(&self, c: &Canvas, a: &Area, cols: &Columns, h: f32) {
+    fn draw_rows(&self, c: &Canvas, a: &Area, cols: &Columns, h: f32, caret_x: Option<f32>) {
         let p = a.panel;
         let (top, lh) = Self::list_area(h);
         c.clip(rect(a.x, top, a.width, lh));
         let end = (p.top + p.rows_visible + 1).min(p.entries.len());
         for (r, idx) in (p.top..end).enumerate() {
-            self.draw_row(c, a, cols, idx, top + r as f32 * ROW_H);
+            self.draw_row(c, a, cols, idx, top + r as f32 * ROW_H, caret_x);
         }
         c.unclip();
     }
 
-    /// One entry: cursor or zebra background, mark bar, icon, name, size, date.
-    fn draw_row(&self, c: &Canvas, a: &Area, cols: &Columns, idx: usize, y: f32) {
+    /// One entry: cursor or zebra background, mark bar, icon, name (or its rename input), size,
+    /// date.
+    fn draw_row(&self, c: &Canvas, a: &Area, cols: &Columns, idx: usize, y: f32, caret_x: Option<f32>) {
         let t = self.theme;
         let f = c.fonts;
         let (x, pw) = (a.x, a.width);
@@ -158,7 +159,13 @@ impl App {
             c.fill_round(rect(x + 5.0, y + 5.0, 3.0, ROW_H - 10.0), 1.5, t.marked);
         }
         c.text(&[glyph], &f.icon, rect(x + PAD, y, ICON_W, ROW_H), icol);
-        c.text(&e.name, &f.name, rect(cols.name_x, y, cols.size_x - cols.name_x - 8.0, ROW_H), tcol);
+        match (&self.mode, caret_x) {
+            (Mode::Rename(r), Some(cx)) if r.panel == a.index && r.row == idx => {
+                let r_in = rect(cols.name_x - 6.0, y + 1.0, cols.size_x - 8.0 - cols.name_x + 6.0, ROW_H - 2.0);
+                draw_input(c, &self.gfx, t, r_in, &r.input, Some(cx));
+            }
+            _ => c.text(&e.name, &f.name, rect(cols.name_x, y, cols.size_x - cols.name_x - 8.0, ROW_H), tcol),
+        }
         let dim = if e.marked { t.marked } else { t.text_dim };
         let size_rect = rect(cols.size_x, y, cols.size_w, ROW_H);
         match e.kind {

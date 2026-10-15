@@ -1,6 +1,9 @@
 //! Mouse input: clicks, right-click marking, scrollbar dragging and the wheel.
 
+use std::time::Instant;
+
 use crate::app::layout::{Hit, ROW_H};
+use crate::app::rename::double_click_ms;
 use crate::app::{App, Mode, TIMER_DRAG, TIMER_LONG_PRESS};
 use crate::sys::win;
 
@@ -25,6 +28,14 @@ impl App {
     pub fn on_button_down(&mut self, x: f32, y: f32, right: bool, double: bool) -> bool {
         if self.drag.is_some() || matches!(self.mode, Mode::Dialog(_) | Mode::Conflict(_)) {
             return false;
+        }
+        self.cancel_pending_rename();
+        if let Mode::Rename(_) = self.mode {
+            // A click elsewhere renames (and then does its usual thing), unless that fails.
+            if self.in_rename_input(x, y) || !self.commit_rename() {
+                self.invalidate();
+                return false;
+            }
         }
         if let Mode::Find = self.mode {
             if !right {
@@ -80,11 +91,22 @@ impl App {
                 capture = true;
             }
             Hit::Row(p, row) => {
+                // A second, slow click on the name under the cursor renames it (like Explorer).
+                // Windows reports clicks up to its (long) double-click time as a double click;
+                // only a quick one opens here.
+                let again = matches!(self.mode, Mode::Normal) && self.active == p && self.panels[p].cursor == row;
+                let quick = self.last_click.is_some_and(|(at, lp, lr)| {
+                    (lp, lr) == (p, row) && at.elapsed().as_millis() < double_click_ms() as u128
+                });
+                self.last_click = Some((Instant::now(), p, row));
                 self.active = p;
                 self.panels[p].search.clear();
                 self.panels[p].set_cursor(row);
-                if double {
+                if double && quick {
+                    self.last_click = None;
                     self.open_current(false);
+                } else if again && self.in_name_column(p, x) {
+                    self.arm_rename(p, row, (x, y));
                 }
             }
             Hit::Scrollbar(p) if !right => capture = self.press_scrollbar(p, y),
@@ -147,6 +169,7 @@ impl App {
                 }
             }
             None => {
+                self.pending_rename_moved(x, y);
                 let hit = self.hit(x, y);
                 let bar = if let Hit::Scrollbar(p) = hit { Some(p) } else { None };
                 let header = if let Hit::Header(p, key) = hit { Some((p, key)) } else { None };
@@ -283,6 +306,12 @@ impl App {
 
     /// Wheel scrolls the panel under the mouse, three rows per notch; the cursor stays.
     pub fn on_wheel(&mut self, x: f32, delta: i16) {
+        self.cancel_pending_rename();
+        if let Mode::Rename(_) = self.mode
+            && !self.commit_rename()
+        {
+            return;
+        }
         if let Mode::Find = self.mode {
             self.find_wheel(-(delta as isize) * 3 / 120);
             self.invalidate();
@@ -292,5 +321,11 @@ impl App {
         let p = if x < self.panel_x(1, w).0 { 0 } else { 1 };
         self.panels[p].scroll(-(delta as isize) * 3 / 120);
         self.invalidate();
+    }
+
+    /// Whether `x` is in the name column of panel `p` (icon included, not size or date).
+    fn in_name_column(&self, p: usize, x: f32) -> bool {
+        let (w, _) = self.gfx.size_dips(self.hwnd);
+        x < self.columns(p, w).size_x - 8.0
     }
 }

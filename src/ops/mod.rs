@@ -201,7 +201,7 @@ fn clear_readonly(path: &Path) {
 }
 
 /// Rename that only changes the case (`a.txt` → `A.txt`).
-fn same_name_ignoring_case(a: &Path, b: &Path) -> bool {
+pub(crate) fn same_name_ignoring_case(a: &Path, b: &Path) -> bool {
     a.as_os_str().eq_ignore_ascii_case(b.as_os_str())
 }
 
@@ -270,7 +270,7 @@ impl Worker {
             Job::Rename { from, to } => {
                 let target = from.with_file_name(&to);
                 if target.exists() && !same_name_ignoring_case(&from, &target) {
-                    self.error(&target, "existiert bereits");
+                    self.error(&target, crate::i18n::t("error.exists"));
                 } else {
                     match std::fs::rename(&from, &target) {
                         Ok(()) => {

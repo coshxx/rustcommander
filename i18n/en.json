@@ -92,6 +92,7 @@
     "no_matches": "No matches for “{mask}”",
     "editor_failed": "Cannot start the editor “{editor}”: {error}",
     "no_context_menu": "No context menu inside archives",
+    "exists": "“{name}” already exists",
     "temp": "Temp folder: {error}"
   },
   "options": {
@@ -140,6 +141,7 @@
     "search_cancelled": "Search cancelled"
   },
   "error": {
+    "exists": "already exists",
     "too_deep": "directory tree too deep",
     "target_is_folder": "target is a folder",
     "recycle": "Recycle Bin: error 0x{code}",

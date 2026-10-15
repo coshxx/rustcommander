@@ -14,6 +14,7 @@ impl App {
     /// `true` = handled.
     pub fn on_key(&mut self, vk: VIRTUAL_KEY) -> bool {
         self.swallow_next_char = false;
+        self.cancel_pending_rename();
         let ctrl = win::key_down(VK_CONTROL);
         let shift = win::key_down(VK_SHIFT);
         let hwnd = self.hwnd;
@@ -84,6 +85,7 @@ impl App {
                 true
             }
             Mode::Find => self.find_key(vk, ctrl, shift),
+            Mode::Rename(_) => self.rename_key(vk, ctrl),
             Mode::Conflict(_) => match vk {
                 VK_RETURN => {
                     self.answer_conflict(Answer::Overwrite);
@@ -278,6 +280,7 @@ impl App {
             }
             Mode::Options { .. } => {}
             Mode::Find => self.find_char(c),
+            Mode::Rename(r) => r.input.insert(c),
             Mode::Conflict(_) => {
                 // The answer keys are translated (German "K" = keine, English "N" = none).
                 let is = |key: &str| t(key).encode_utf16().next().is_some_and(|k| fold_case(k) == fold_case(c));

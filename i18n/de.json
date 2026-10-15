@@ -92,6 +92,7 @@
     "no_matches": "Keine Treffer für „{mask}“",
     "editor_failed": "Editor „{editor}“ startet nicht: {error}",
     "no_context_menu": "Kein Kontextmenü in Archiven",
+    "exists": "„{name}“ existiert bereits",
     "temp": "Temp-Ordner: {error}"
   },
   "options": {
@@ -140,6 +141,7 @@
     "search_cancelled": "Suche abgebrochen"
   },
   "error": {
+    "exists": "existiert bereits",
     "too_deep": "Verzeichnisbaum zu tief",
     "target_is_folder": "Ziel ist ein Ordner",
     "recycle": "Papierkorb: Fehler 0x{code}",
