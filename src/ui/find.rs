@@ -2,10 +2,11 @@
 
 use crate::app::App;
 use crate::app::find::{Find, LABELS, LIST};
-use crate::app::format::format_date;
+use crate::app::format::{decimal, format_date};
 use crate::app::layout::{DATE_W, FIND_LABEL_W, ICON_W, ROW_H};
 use crate::files::listing::{Kind, kind_from_extension};
 use crate::files::names::to_utf16_nul;
+use crate::i18n::{self, tf, tn};
 use crate::sys::gfx::{Canvas, Rect, rect};
 use crate::ui::panel::icon;
 use crate::ui::widgets::{draw_card, draw_chips, draw_input};
@@ -18,21 +19,23 @@ impl App {
         let l = Self::find_layout(w, h);
         draw_card(c, t, l.card);
         let x = l.card.left + 20.0;
-        c.text_str("Suchen", &c.fonts.path, rect(x, l.card.top + 14.0, 200.0, 28.0), t.text);
+        c.text_str(i18n::t("find.title"), &c.fonts.path, rect(x, l.card.top + 14.0, 200.0, 28.0), t.text);
         for (i, (r, label)) in l.inputs.iter().zip(LABELS).enumerate() {
             let col = if f.focus == i { t.text } else { t.text_dim };
-            c.text_str(label, &c.fonts.name, rect(x, r.top, FIND_LABEL_W, r.bottom - r.top), col);
+            c.text_str(i18n::t(label), &c.fonts.name, rect(x, r.top, FIND_LABEL_W, r.bottom - r.top), col);
             draw_input(c, &self.gfx, t, *r, &f.inputs[i], caret_x.filter(|_| f.focus == i));
         }
         let (status, col) = self.find_status(f);
         c.text_str(&status, &c.fonts.small, l.status, col);
         self.draw_hits(c, f, l.list);
         let running = f.running.is_some();
-        let esc = ("Esc", if running { "Abbrechen" } else { "Schließen" });
+        let tr = i18n::t;
+        let esc = ("Esc", tr(if running { "common.cancel" } else { "common.close" }));
+        let field = ("Tab", tr("find.field"));
         let chips = if f.focus == LIST {
-            vec![("Enter", "Hingehen"), ("F3", "Ansehen"), ("Tab", "Feld"), esc]
+            vec![("Enter", tr("find.go")), ("F3", tr("find.view")), field, esc]
         } else {
-            vec![("Enter", if running { "Neu suchen" } else { "Suchen" }), ("Tab", "Feld"), esc]
+            vec![("Enter", tr(if running { "find.search_again" } else { "find.search" })), field, esc]
         };
         draw_chips(c, &self.gfx, t, x, l.chips_y, 28.0, &chips);
     }
@@ -44,15 +47,18 @@ impl App {
             return (e.clone(), t.error);
         }
         if !f.searched {
-            let hint = "Name wie bei Num+: *.rs;*.toml | target\\  ·  Ordner: Name\\  ·  leer = alles";
-            return (hint.into(), t.text_hidden);
+            return (i18n::t("find.hint").into(), t.text_hidden);
         }
-        let hits = format!("{} Treffer  ·  {} Ordner durchsucht", f.hits.len(), f.dirs);
+        let status = format!("{}  ·  {}", tn("find.hits", f.hits.len() as u64), tn("find.dirs", f.dirs));
         if f.running.is_some() {
-            return (format!("Suche läuft …  {hits}"), t.accent);
+            return (tf("find.running", &[("status", &status)]), t.accent);
         }
-        let secs = format!("{:.1}", f.elapsed.as_secs_f64()).replace('.', ",");
-        let text = if f.cancelled { format!("Abgebrochen  ·  {hits}") } else { format!("{hits} in {secs} s") };
+        let secs = decimal(&format!("{:.1}", f.elapsed.as_secs_f64()));
+        let text = if f.cancelled {
+            tf("find.cancelled", &[("status", &status)])
+        } else {
+            tf("find.done", &[("status", &status), ("secs", &secs)])
+        };
         (text, t.text_dim)
     }
 
@@ -87,7 +93,7 @@ impl App {
             let dir = hit.path.parent().and_then(|p| p.strip_prefix(&f.root).ok()).map(|p| p.display().to_string());
             let dir = dir.filter(|d| !d.is_empty()).map_or_else(|| ".".to_string(), |d| format!(".\\{d}"));
             c.text_str(&dir, &fonts.small, rect(dir_x, y, size_x - dir_x - 8.0, ROW_H), t.text_dim);
-            let size = if hit.is_dir { "Ordner".to_string() } else { self.size_text(hit.size) };
+            let size = if hit.is_dir { i18n::t("common.folder").to_string() } else { self.size_text(hit.size) };
             let size_font = if hit.is_dir { &fonts.small_right } else { &fonts.right };
             c.text_str(&size, size_font, rect(size_x, y, size_w, ROW_H), t.text_dim);
             c.text_str(&format_date(hit.mtime), &fonts.small, rect(date_x, y, DATE_W, ROW_H), t.text_dim);

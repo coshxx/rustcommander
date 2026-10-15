@@ -23,6 +23,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{Interface, PCSTR, PCWSTR, PSTR};
 
 use crate::files::names::to_utf16_nul;
+use crate::i18n::t;
 use crate::sys::win;
 
 /// First command ID handed to the shell; 0 means "nothing chosen".
@@ -52,14 +53,14 @@ impl Drop for Pidl {
 /// Show the context menu for `paths` (all in one directory) at screen point `pt` and run the
 /// chosen command. `extended` (Shift held) adds the extended verbs, like in Explorer.
 pub fn show(hwnd: HWND, paths: &[PathBuf], pt: POINT, extended: bool) -> Result<Option<Chosen>, String> {
-    let menu = context_menu(hwnd, paths).map_err(|e| format!("Kontextmenü nicht verfügbar: {}", e.message()))?;
+    let menu = context_menu(hwnd, paths).map_err(|e| format!("{}: {}", t("error.context_menu"), e.message()))?;
     unsafe {
         let hmenu = CreatePopupMenu().map_err(|e| e.message())?;
         // CANRENAME: "Umbenennen" is listed; the app runs its own rename dialog for it.
         let flags = CMF_NORMAL | CMF_EXPLORE | CMF_CANRENAME | if extended { CMF_EXTENDEDVERBS } else { 0 };
         if menu.QueryContextMenu(hmenu, 0, FIRST_ID, LAST_ID, flags).is_err() {
             let _ = DestroyMenu(hmenu);
-            return Err("Kontextmenü nicht verfügbar".into());
+            return Err(t("error.context_menu").into());
         }
         OPEN.with(|o| *o.borrow_mut() = Some(menu.clone()));
         // Left button only: the right button may still be held after a long press.

@@ -28,6 +28,21 @@ use crate::{app, lister, panel, theme};
 
 /// Resource ID of the icon in `res/app.rc`.
 const ICON_ID: u16 = 1;
+/// "Options…" in the window menu (system menu IDs must be multiples of 16 below 0xF000).
+const IDM_OPTIONS: usize = 0x10;
+
+/// Adds "Options…  Ctrl+," to the window menu, or relabels it after a language switch.
+pub(crate) fn system_menu(hwnd: HWND) {
+    let (key, label) = crate::ui::widgets::hint("options");
+    let text = HSTRING::from(format!("{label}…\t{key}"));
+    unsafe {
+        let menu = GetSystemMenu(hwnd, false);
+        if ModifyMenuW(menu, IDM_OPTIONS as u32, MF_BYCOMMAND | MF_STRING, IDM_OPTIONS, &text).is_err() {
+            let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
+            let _ = AppendMenuW(menu, MF_STRING, IDM_OPTIONS, &text);
+        }
+    }
+}
 
 /// "RustCommander 0.1.0", plus "(Debug)" in debug builds.
 fn title() -> HSTRING {
@@ -127,6 +142,7 @@ pub(crate) fn create_window() -> HWND {
         .expect("CreateWindowExW");
 
         dark_title_bar(hwnd);
+        system_menu(hwnd);
         hwnd
     }
 }
@@ -226,6 +242,10 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
         WM_SYSKEYDOWN => done(cell.with(|app| app.on_syskey(VIRTUAL_KEY(wp.0 as u16)))),
         // Alt alone must not enter the (non-existent) menu.
         WM_SYSCOMMAND if (wp.0 & 0xfff0) as u32 == SC_KEYMENU && lp.0 == 0 => LRESULT(0),
+        WM_SYSCOMMAND if wp.0 & 0xfff0 == IDM_OPTIONS => {
+            cell.with(|app| app.menu_options());
+            LRESULT(0)
+        }
         WM_CHAR => done(cell.with(|app| {
             app.on_char(wp.0 as u16);
             true

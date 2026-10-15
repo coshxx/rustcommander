@@ -7,6 +7,7 @@ use std::time::Instant;
 use crate::app::{App, Mode, TIMER_JOB, Tone, WM_APP_JOB};
 use crate::files::names::to_utf16_nul;
 use crate::files::temp;
+use crate::i18n::{t, tf, tn};
 use crate::ops::{self, Answer, Job};
 use crate::sys::win::{self, SendHwnd};
 
@@ -53,18 +54,18 @@ impl App {
     /// its default program or in a lister.
     pub(crate) fn extract_then(&mut self, panel: usize, path: PathBuf, then: AfterJob) {
         if self.job.is_some() {
-            self.notify("Es läuft bereits ein Vorgang".into(), Tone::Error);
+            self.notify(t("notice.job_running").into(), Tone::Error);
             return;
         }
         match temp::new_dir() {
             Ok(dir) => {
-                let title = if then == AfterJob::View { "Ansehen" } else { "Öffnen" };
+                let title = t(if then == AfterJob::View { "job.view" } else { "job.open" });
                 self.start_job(Job::Extract { sources: vec![path], dest: dir }, title, panel);
                 if let Some(job) = &mut self.job {
                     job.then = then;
                 }
             }
-            Err(e) => self.notify(format!("Temp-Ordner: {e}"), Tone::Error),
+            Err(e) => self.notify(tf("notice.temp", &[("error", &e)]), Tone::Error),
         }
     }
 
@@ -103,13 +104,13 @@ impl App {
             return;
         }
         let (text, tone) = if let Some(first) = s.errors.first() {
-            let more = if s.errors.len() > 1 { format!(" (+{} weitere)", s.errors.len() - 1) } else { String::new() };
+            let more = if s.errors.len() > 1 { tf("job.more", &[("n", &(s.errors.len() - 1))]) } else { String::new() };
             (format!("{}: {first}{more}", job.title), Tone::Error)
         } else if s.cancelled {
-            (format!("{} abgebrochen", job.title), Tone::Info)
+            (tf("job.cancelled", &[("title", &job.title)]), Tone::Info)
         } else {
-            let what = if s.done == 1 { "Element" } else { "Elemente" };
-            (format!("{}: fertig ({} {what})", job.title, s.done), Tone::Success)
+            let items = tn("dialog.items", s.done);
+            (tf("job.done", &[("title", &job.title), ("items", &items)]), Tone::Success)
         };
         self.notify(text, tone);
         if s.errors.is_empty() && !s.cancelled {

@@ -31,7 +31,7 @@ impl MappedFile {
         let file = OpenOptions::new().read(true).share_mode(SHARE_ALL).open(path)?;
         let meta = file.metadata()?;
         if meta.is_dir() {
-            return Err(std::io::Error::other("ist ein Ordner"));
+            return Err(std::io::Error::other(crate::i18n::t("error.is_folder")));
         }
         let len = usize::try_from(meta.len()).map_err(std::io::Error::other)?;
         let mut mapped = MappedFile { _file: file, map: HANDLE::default(), view: Default::default(), len: 0 };

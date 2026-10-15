@@ -12,9 +12,11 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, VI
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{HSTRING, w};
 
+use crate::app::format::quoted;
 use crate::lister::{Lister, WM_APP_SEARCH, settings};
 use crate::ops::error_text;
 use crate::sys::mapped::MappedFile;
+use crate::sys::win;
 use crate::theme;
 use crate::window::{AppCell, app_icon, dark_title_bar, show_window};
 
@@ -49,7 +51,7 @@ fn register_class() {
 /// Open a lister window for `path`. Errors are meant for the user (file can't be opened …).
 pub fn open(path: &Path) -> Result<(), String> {
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let file = MappedFile::open(path).map_err(|e| format!("„{name}“: {}", error_text(&e)))?;
+    let file = MappedFile::open(path).map_err(|e| format!("{}: {}", quoted(&name), error_text(&e)))?;
     register_class();
     let title = HSTRING::from(format!("Lister – {}", path.display()));
     let hwnd = unsafe {
@@ -86,6 +88,13 @@ pub fn open(path: &Path) -> Result<(), String> {
     OPEN.with(|o| o.borrow_mut().push(hwnd));
     show_window(hwnd, settings().window);
     Ok(())
+}
+
+/// Repaint all lister windows (e.g. after the UI language changed).
+pub fn repaint_all() {
+    for hwnd in OPEN.with(|o| o.borrow().clone()) {
+        win::invalidate(hwnd);
+    }
 }
 
 /// Close all lister windows (they save their settings on the way).

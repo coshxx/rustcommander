@@ -54,7 +54,7 @@ the steady-state frame time).
   "Ordner in die Sortierung einschließen" folders are always sorted by name (descending only when
   sorting by name descending). The sort column shows ▲/▼; saved per panel in `config.json`.
 - Hidden/system files: dimmed.
-- UI language: German for now.
+- UI language: English or German (see Languages below).
 
 ## Controls (v0.1)
 
@@ -64,6 +64,8 @@ the steady-state frame time).
 | ↑ ↓ PgUp PgDn Home End | Move cursor |
 | Enter / double-click | Open directory or archive, or open file via shell (from an archive: extracted to temp first) |
 | Shift+Enter | Open with the default program, also archives |
+| F4 | Edit the file in the editor (Notepad, or `"editor"` in `config.json`); not inside archives |
+| Shift+F4 | Edit a file by name; created empty if it doesn't exist (dialog preset with the file under the cursor) |
 | F3 | View the file in a lister window (see below; from an archive: extracted to temp first) |
 | Ctrl+PgDn | Enter directory or archive (nothing else) |
 | Backspace, Ctrl+PgUp | Parent directory |
@@ -72,7 +74,7 @@ the steady-state frame time).
 | Ctrl+L, click on path | Edit path (Ctrl+V, environment variables) |
 | Ctrl+R, F2 | Reload |
 | Type letters | Quick search (jumps to first match), Esc cancels; with the option "Alt+letter" only Alt+letter starts it |
-| Insert, Space | Toggle mark and move down (Space only when no quick search is active) |
+| Insert, Space | Toggle mark and move down (Space only when no quick search is active; see `space_stays`) |
 | Space on a folder | Also counts the folder's size, shown in the size column (see below) |
 | Alt+Shift+Enter | Count the size of every folder in the pane |
 | Shift+↑ / Shift+↓ | Toggle mark and move |
@@ -90,7 +92,7 @@ the steady-state frame time).
 | Ctrl+F3 / Ctrl+F6 / Ctrl+F5 | Sort by name / size / date; again = other direction |
 | Shift+F10, menu key | Shell context menu (Shift held: extended entries) |
 | Alt+F7 | File search (see below) |
-| Ctrl+, | Options (see below) |
+| Ctrl+, | Options (see below); also the gear button at the right end of the key bar and "Options…" in the window menu |
 
 ### Mouse
 
@@ -130,17 +132,24 @@ On startup the last directories and the window position are restored
 
 ### Settings (Ctrl+,)
 
-- Options dialog: one checkbox per option; ↑/↓ select, Space/Enter/click toggle, Esc or a click
-  outside closes. A change takes effect and is saved immediately (no OK/Cancel).
-- **Genaue Größen in Bytes anzeigen** (`exact_sizes`, default off): size column (files and counted
-  folders, also while counting) and status bar show exact byte counts with German thousands
-  separators (`48.318.382.080`, no unit; `≥` keeps its meaning). The size column is then 140
+- Opened with Ctrl+, the gear button at the right end of the key bar (always visible, hover shows
+  "Options (Ctrl+,)"; clicking it again closes the dialog) or "Options…" in the window menu
+  (title bar icon / Alt+Space).
+- Options dialog: the language, then one checkbox per option; ↑/↓ select, Space/Enter/click toggle
+  (on the language row: open the list of languages), Esc or a click outside closes. A change takes
+  effect and is saved immediately (no OK/Cancel).
+- **Language** (`language`): see Languages below.
+- **Show exact sizes in bytes** (`exact_sizes`, default off): size column (files and counted
+  folders, also while counting) and status bar show exact byte counts with thousands separators
+  (`48,318,382,080` / `48.318.382.080`, no unit; `≥` keeps its meaning). The size column is then 140
   instead of 84 DIPs wide. Progress card and lister stay rounded.
-- **Ordner in die Sortierung einschließen** (`sort_dirs`, default off): folders (still above the
+- **Include folders in the sort order** (`sort_dirs`, default off): folders (still above the
   files) are sorted by the chosen column too; see Sorting and Folder sizes.
-- **Schnellsuche nur mit Alt+Buchstabe** (`alt_search`, default off): Alt+character starts the
+- **Quick search only with Alt+letter** (`alt_search`, default off): Alt+character starts the
   quick search; while it runs, plain characters continue it. Without a running search plain
   characters do nothing (`\` and Space keep working).
+- **Space marks without moving down** (`space_stays`, default off): Space toggles the mark (and
+  counts a folder) but the cursor stays; Insert still moves down.
 - Everything is saved in `%APPDATA%\RustCommander\config.json` (`RC_CONFIG_DIR` overrides the
   directory), written by a small JSON reader/writer of our own (no serde):
 
@@ -153,12 +162,30 @@ On startup the last directories and the window position are restored
     "window": { "left": 100, "top": 100, "right": 1500, "bottom": 900, "maximized": false },
     "mask": "*.rs",
     "lister": { "window": { … }, "wrap": true },
-    "options": { "exact_sizes": false, "alt_search": false, "sort_dirs": false }
+    "editor": "notepad.exe",
+    "options": { "exact_sizes": false, "alt_search": false, "sort_dirs": false, "space_stays": false,
+                 "language": "en" }
   }
   ```
 
   Unknown keys are ignored, missing ones get their default, a broken file gives all defaults.
   An old `config.ini` is not read.
+
+### Languages
+
+- English and German. Every text lives in `i18n/en.json` / `i18n/de.json` (embedded at compile
+  time), nested by area and looked up by dotted key (`i18n::t("dialog.copy")`). Placeholders are
+  named (`{name}`), counts use `<key>_one` / `<key>_other` (`i18n::tn`). A missing text falls back
+  to English, then to the key. A test checks that both files have the same keys.
+- Numbers and dates follow the language: `1.2 GB`, `48,318,382,080`, `2026-10-15  09:21` (English,
+  ISO date) / `1,2 GB`, `48.318.382.080`, `15.10.2026  09:21` (German). Key names in hints too
+  (`Ctrl`/`Strg`, `Ins`/`Einfg`); the conflict keys are S/A/N in English, S/A/K in German.
+- Until a language is chosen in the options, the Windows display language decides (German →
+  German, anything else → English); `options.language` is written only once chosen. Switching
+  redraws everything right away, lister windows included.
+- Not translated: error texts that come from Windows, the shell context menu (both in the Windows
+  language) and the window title.
+- Adding a language: a new `i18n/<id>.json`, one entry in `i18n::Lang`.
 
 ### File search (Alt+F7)
 

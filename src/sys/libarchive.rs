@@ -2,6 +2,7 @@
 //! for zip/7z/rar), so no extra library is needed. It is loaded from System32 on first use;
 //! on older Windows it is missing and archives can't be opened.
 
+use crate::i18n::t;
 use std::ffi::{CStr, c_char, c_void};
 use std::path::Path;
 use std::sync::OnceLock;
@@ -109,10 +110,10 @@ impl Drop for Reader {
 
 impl Reader {
     pub fn open(path: &Path) -> Result<Reader, String> {
-        let api = api().ok_or("Archive öffnen braucht Windows 11 (archiveint.dll fehlt)")?;
+        let api = api().ok_or(t("error.needs_windows_11"))?;
         let archive = unsafe { (api.read_new)() };
         if archive.is_null() {
-            return Err("libarchive: kein Speicher".into());
+            return Err(t("error.out_of_memory").into());
         }
         let reader = Reader { api, archive, entry: std::ptr::null_mut() };
         let name = to_utf16_nul(path.as_os_str());
@@ -173,14 +174,10 @@ impl Reader {
     fn error(&self) -> String {
         let msg = unsafe { (self.api.error_string)(self.archive) };
         let text = if msg.is_null() {
-            "unbekannter Fehler".to_string()
+            t("error.unknown").to_string()
         } else {
             unsafe { CStr::from_ptr(msg) }.to_string_lossy().into_owned()
         };
-        if text.to_ascii_lowercase().contains("encrypt") {
-            "Verschlüsseltes Archiv – Passwörter werden noch nicht unterstützt".into()
-        } else {
-            text
-        }
+        if text.to_ascii_lowercase().contains("encrypt") { t("error.encrypted_archive").into() } else { text }
     }
 }

@@ -33,11 +33,19 @@ impl App {
             }
             return false;
         }
-        if let Mode::Options { .. } = self.mode {
-            match self.option_at(x, y) {
-                Some(Some(i)) if !right => self.toggle_option(i),
-                Some(_) => {}
-                None => self.mode = Mode::Normal,
+        if let Mode::Options { sel, popup } = self.mode {
+            if popup.is_some() {
+                // The language list is open: a click picks a language or closes the list.
+                match self.language_at(x, y) {
+                    Some(i) if !right => self.choose_language(crate::i18n::Lang::ALL[i]),
+                    _ => self.mode = Mode::Options { sel, popup: None },
+                }
+            } else {
+                match self.option_at(x, y) {
+                    Some(Some(row)) if !right => self.activate_option(row),
+                    Some(_) => {}
+                    None => self.mode = Mode::Normal,
+                }
             }
             self.invalidate();
             return false;
@@ -87,8 +95,9 @@ impl App {
                 self.panels[p].search.clear();
                 self.sort_by(p, key);
             }
+            Hit::Gear if !right => self.open_options(),
             Hit::Drive(p) | Hit::Path(p) | Hit::Scrollbar(p) | Hit::Panel(p) | Hit::Header(p, _) => self.active = p,
-            Hit::Popup(_) | Hit::Nothing => {}
+            Hit::Popup(_) | Hit::Gear | Hit::Nothing => {}
         }
         self.invalidate();
         capture
@@ -141,18 +150,21 @@ impl App {
                 let hit = self.hit(x, y);
                 let bar = if let Hit::Scrollbar(p) = hit { Some(p) } else { None };
                 let header = if let Hit::Header(p, key) = hit { Some((p, key)) } else { None };
-                if bar != self.hover_bar || header != self.hover_header {
+                let gear = matches!(hit, Hit::Gear);
+                if bar != self.hover_bar || header != self.hover_header || gear != self.hover_gear {
                     self.hover_bar = bar;
                     self.hover_header = header;
+                    self.hover_gear = gear;
                     self.invalidate();
                 }
             }
         }
     }
 
-    /// `WM_MOUSELEAVE`: no scrollbar or column header is hovered anymore.
+    /// `WM_MOUSELEAVE`: no scrollbar, column header or gear is hovered anymore.
     pub fn on_mouse_leave(&mut self) {
-        if self.hover_bar.take().is_some() | self.hover_header.take().is_some() {
+        let gear = std::mem::take(&mut self.hover_gear);
+        if self.hover_bar.take().is_some() | self.hover_header.take().is_some() | gear {
             self.invalidate();
         }
     }

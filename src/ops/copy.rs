@@ -1,5 +1,6 @@
 //! Copying files and directory trees (`CopyFileExW`, cancellable mid-file).
 
+use crate::i18n::t;
 use std::ffi::c_void;
 use std::path::Path;
 use std::sync::atomic::Ordering;
@@ -53,7 +54,7 @@ impl Worker {
         };
         if m.is_dir() {
             if depth >= MAX_DEPTH {
-                self.error(src, "Verzeichnisbaum zu tief");
+                self.error(src, t("error.too_deep"));
                 return Ok(());
             }
             if let Err(e) = std::fs::create_dir_all(dst) {
@@ -81,7 +82,7 @@ impl Worker {
         self.progress.current = src.to_path_buf();
         if let Ok(dm) = std::fs::symlink_metadata(dst) {
             if dm.is_dir() {
-                self.error(dst, "Ziel ist ein Ordner");
+                self.error(dst, t("error.target_is_folder"));
                 self.skip_file(len);
                 return Ok(false);
             }

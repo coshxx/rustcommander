@@ -1,6 +1,7 @@
 //! Moving: a rename on the same volume, copy + delete across volumes; merges into
 //! existing directories.
 
+use crate::i18n::t;
 use std::path::Path;
 
 use windows::Win32::Foundation::ERROR_NOT_SAME_DEVICE;
@@ -33,7 +34,7 @@ impl Worker {
                 return Ok(());
             }
             if dm.is_dir() != src_dir {
-                self.error(dst, "Ziel existiert mit anderem Typ (Datei/Ordner)");
+                self.error(dst, t("error.type_mismatch"));
                 return Ok(());
             }
             if !self.resolve_conflict(dst)? {
@@ -88,12 +89,12 @@ impl Worker {
             }
         };
         if is_reparse(&m) {
-            self.error(src, "Verknüpfungen können nicht laufwerksübergreifend verschoben werden");
+            self.error(src, t("error.link_across_drives"));
             return Ok(());
         }
         if m.is_dir() {
             if depth >= MAX_DEPTH {
-                self.error(src, "Verzeichnisbaum zu tief");
+                self.error(src, t("error.too_deep"));
                 return Ok(());
             }
             if let Err(e) = std::fs::create_dir_all(dst) {

@@ -1,6 +1,7 @@
 //! Drawing a lister window: the visible lines, scrollbar, status bar and search dialog.
 
 use crate::app::format::{format_size, utf16};
+use crate::i18n::{t as t_, tf};
 use crate::lister::text::{Line, Mode};
 use crate::lister::{Lister, shared};
 use crate::sys::gfx::{Canvas, Rect, rect};
@@ -59,7 +60,7 @@ impl Lister {
         let doc = self.doc();
         let len = self.file.bytes().len();
         if len == 0 {
-            c.text_str("(leere Datei)", &c.fonts.mono, rect(area.left, area.top, 400.0, LINE_H), t.text_dim);
+            c.text_str(t_("lister.empty"), &c.fonts.mono, rect(area.left, area.top, 400.0, LINE_H), t.text_dim);
         }
         let mut p = self.top;
         for row in 0..self.rows {
@@ -87,10 +88,10 @@ impl Lister {
             let r = rect(((w - dw) / 2.0).floor(), ((h - 136.0) / 2.5).floor(), dw, 136.0);
             draw_card(&c, t, r);
             let (x, iw) = (r.left + 20.0, dw - 40.0);
-            c.text_str("Suchen", &c.fonts.path, rect(x, r.top + 16.0, iw, 28.0), t.text);
+            c.text_str(t_("lister.search"), &c.fonts.path, rect(x, r.top + 16.0, iw, 28.0), t.text);
             draw_input(&c, &self.gfx, t, rect(x, r.top + 50.0, iw, 32.0), input, Some(cx));
-            let case = if shared().match_case { "Groß/klein beachten" } else { "Groß/klein egal" };
-            let chips = [("Enter", "Suchen"), ("Alt+G", case), ("Esc", "Abbrechen")];
+            let case = t_(if shared().match_case { "lister.match_case" } else { "lister.ignore_case" });
+            let chips = [("Enter", t_("lister.search")), ("Alt+G", case), ("Esc", t_("common.cancel"))];
             draw_chips(&c, &self.gfx, t, x, r.top + 94.0, 28.0, &chips);
         }
         self.gfx.end();
@@ -138,7 +139,7 @@ impl Lister {
         let mut parts = vec![self.mode.label().to_string()];
         if self.mode == Mode::Text {
             parts.push(self.enc.label().into());
-            parts.push(if self.wrap { "Umbruch an" } else { "Umbruch aus" }.into());
+            parts.push(t_(if self.wrap { "lister.wrap_on" } else { "lister.wrap_off" }).into());
         } else {
             parts.push(self.enc.single_byte().label().into());
         }
@@ -156,17 +157,17 @@ impl Lister {
         let right = rect(x, y, (w - x - PAD_X).max(0.0), STATUS_H);
         c.clip(right);
         if let Some(running) = &self.running {
-            let text = format!("Suche … {} %  ·  Esc bricht ab", running.percent());
+            let text = tf("lister.searching", &[("percent", &running.percent())]);
             c.text_str(&text, &c.fonts.small, right, t.accent);
         } else if let Some(message) = &self.message {
             c.text_str(message, &c.fonts.small, right, t.marked);
         } else {
             let hints = [
-                ("1 2 3", "Text/Binär/Hex"),
-                ("W", "Umbruch"),
-                ("A S U ⇧U", "Kodierung"),
-                ("F7", "Suchen"),
-                ("Esc", "Schließen"),
+                ("1 2 3", t_("lister.modes")),
+                ("W", t_("lister.wrap")),
+                ("A S U ⇧U", t_("lister.encoding")),
+                ("F7", t_("lister.search")),
+                ("Esc", t_("common.close")),
             ];
             draw_chips(c, &self.gfx, t, x, y, STATUS_H, &hints);
         }
