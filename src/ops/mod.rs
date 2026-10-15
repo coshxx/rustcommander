@@ -1,11 +1,12 @@
 //! File operations on a worker thread: copy, move, delete (permanent or to the recycle bin),
-//! rename, create directory, extract from an archive. Reports progress, asks the UI about
-//! conflicts, can be cancelled.
+//! rename, create directory, extract from an archive, pack into and unpack whole archives.
+//! Reports progress, asks the UI about conflicts, can be cancelled.
 
 mod copy;
 mod delete;
 mod extract;
 mod moving;
+pub mod pack;
 #[cfg(test)]
 mod tests;
 
@@ -46,6 +47,19 @@ pub enum Job {
     Extract {
         sources: Vec<PathBuf>,
         dest: PathBuf,
+    },
+    /// Create the archive `dest` from `sources`.
+    Pack {
+        sources: Vec<PathBuf>,
+        dest: PathBuf,
+        format: pack::Format,
+        level: pack::Level,
+    },
+    /// Unpack whole archives into `dest` (with `subdir`: each into `dest\<its name>`).
+    Unpack {
+        archives: Vec<PathBuf>,
+        dest: PathBuf,
+        subdir: bool,
     },
 }
 
@@ -283,6 +297,8 @@ impl Worker {
                 Ok(())
             }
             Job::Extract { sources, dest } => self.extract(&sources, &dest),
+            Job::Pack { sources, dest, format, level } => self.pack(&sources, &dest, format, level),
+            Job::Unpack { archives, dest, subdir } => self.unpack(&archives, &dest, subdir),
             Job::MkDir { path } => {
                 match std::fs::create_dir_all(&path) {
                     Ok(()) => {

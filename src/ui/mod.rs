@@ -13,7 +13,7 @@ use crate::app::format::utf16;
 use crate::app::{App, Mode};
 use crate::sys::gfx::rect;
 use crate::sys::win::SendHwnd;
-use crate::ui::widgets::{HINTS, hint};
+use crate::ui::widgets::{ALT_HINTS, HINTS, hint};
 
 impl App {
     /// `WM_PAINT`: draw the whole window.
@@ -30,20 +30,20 @@ impl App {
         self.layout();
         if self.hint_widths.is_none() {
             let f = &self.gfx.fonts;
-            self.hint_widths = Some(
-                HINTS
-                    .iter()
+            let measure = |ids: &[&str]| -> Vec<(f32, f32)> {
+                ids.iter()
                     .map(|id| {
                         let (k, l) = hint(id);
                         (self.gfx.measure(&utf16(k), &f.small_center), self.gfx.measure(&utf16(l), &f.small))
                     })
-                    .collect(),
-            );
+                    .collect()
+            };
+            self.hint_widths = Some([measure(&HINTS), measure(&ALT_HINTS)]);
         }
         let (w, h) = self.gfx.size_dips(self.hwnd);
         let input = match &self.mode {
             Mode::PathEdit { input, .. } => Some(input),
-            Mode::Dialog(d) => d.input.as_ref(),
+            Mode::Dialog(d) => d.input.as_ref().filter(|_| d.focus == 0),
             Mode::Find => self.find.as_ref().and_then(|f| f.inputs.get(f.focus)),
             Mode::Rename(r) => Some(&r.input),
             _ => None,

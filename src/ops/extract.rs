@@ -125,7 +125,7 @@ impl Worker {
 
     /// Write the current entry's data to `out` (asks first if `out` exists). Failures are
     /// reported and leave no partial file behind.
-    fn extract_file(
+    pub(super) fn extract_file(
         &mut self,
         reader: &mut Reader,
         out: &Path,

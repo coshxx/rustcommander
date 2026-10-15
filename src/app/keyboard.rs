@@ -8,7 +8,8 @@ use crate::files::names::fold_case;
 use crate::files::sort::SortKey;
 use crate::i18n::{Lang, t};
 use crate::ops::Answer;
-use crate::sys::win;
+use crate::sys::win::{self, SendHwnd};
+use windows::Win32::UI::WindowsAndMessaging::WM_CLOSE;
 
 impl App {
     /// `true` = handled.
@@ -52,7 +53,11 @@ impl App {
                     self.mode = Mode::Normal;
                     true
                 }
-                _ => d.input.as_mut().is_some_and(|i| i.key(vk, ctrl, hwnd)),
+                _ if d.extra.rows() > 0 && self.dialog_extra_key(vk, shift) => true,
+                _ => match &mut self.mode {
+                    Mode::Dialog(d) => d.input.as_mut().is_some_and(|i| i.key(vk, ctrl, hwnd)),
+                    _ => false,
+                },
             },
             Mode::Options { sel, popup: Some(p) } => {
                 let n = Lang::ALL.len();
@@ -235,10 +240,27 @@ impl App {
     }
 
     /// Alt+F1 / Alt+F2: drive popup for the left / right panel; Alt+Shift+Enter: count the
-    /// size of every folder; Alt+F7: file search.
+    /// size of every folder; Alt+F5 / Alt+F9: pack / unpack; Alt+F7: file search. Alt alone
+    /// switches the key bar to the Alt keys (not AltGr, which comes with Ctrl).
     pub fn on_syskey(&mut self, vk: VIRTUAL_KEY) -> bool {
+        if vk == VK_MENU {
+            if !self.alt_down && !win::key_down(VK_CONTROL) {
+                self.alt_down = true;
+                self.invalidate();
+            }
+            return false;
+        }
         if !matches!(self.mode, Mode::Normal | Mode::Drives(_)) {
             return false;
+        }
+        if matches!(vk, VK_F5 | VK_F9) && matches!(self.mode, Mode::Normal) {
+            if vk == VK_F5 {
+                self.open_pack()
+            } else {
+                self.open_unpack()
+            }
+            self.invalidate();
+            return true;
         }
         if vk == VK_RETURN && matches!(self.mode, Mode::Normal) && win::key_down(VK_SHIFT) {
             self.count_all_sizes();
@@ -258,6 +280,48 @@ impl App {
         self.open_drives(panel);
         self.invalidate();
         true
+    }
+
+    /// Alt released (or the window lost the focus): back to the normal key bar.
+    pub fn on_alt_up(&mut self) {
+        if self.alt_down {
+            self.alt_down = false;
+            self.invalidate();
+        }
+    }
+
+    /// A click on a key bar entry does what its key does.
+    pub(crate) fn run_hint(&mut self, id: &str) {
+        let a = self.active;
+        match id {
+            "tab" => {
+                self.panels[a].search.clear();
+                self.active ^= 1;
+            }
+            "view" => self.view_current(),
+            "edit" => self.edit_current(),
+            "mark" => {
+                let p = &mut self.panels[a];
+                p.toggle_mark();
+                p.move_cursor(1);
+            }
+            "select" => self.open_dialog(DialogKind::Select { add: true }),
+            "copy" => self.open_dialog(DialogKind::Copy),
+            "move" => self.open_dialog(DialogKind::Move),
+            "rename" => self.open_dialog(DialogKind::Rename),
+            "mkdir" => self.open_dialog(DialogKind::MkDir),
+            "delete" => self.open_dialog(DialogKind::Delete { recycle: true }),
+            "drive" => self.open_drives(a),
+            "drive_left" => self.open_drives(0),
+            "drive_right" => self.open_drives(1),
+            "path" => self.start_path_edit(a),
+            "find" => self.open_find(),
+            "pack" => self.open_pack(),
+            "unpack" => self.open_unpack(),
+            "quit" => SendHwnd::new(self.hwnd).post(WM_CLOSE),
+            _ => {}
+        }
+        self.arm_loading_indicator();
     }
 
     /// Typed characters: quick search, text inputs, drive letters, conflict answers.
@@ -281,7 +345,7 @@ impl App {
             }
             Mode::PathEdit { input, .. } => input.insert(c),
             Mode::Dialog(d) => {
-                if let Some(i) = &mut d.input {
+                if let Some(i) = d.input.as_mut().filter(|_| d.focus == 0) {
                     i.insert(c);
                 }
             }

@@ -26,7 +26,14 @@ pub(crate) enum Drag {
 impl App {
     /// Mouse button pressed. Returns `true` if a drag started and the mouse should be captured.
     pub fn on_button_down(&mut self, x: f32, y: f32, right: bool, double: bool) -> bool {
-        if self.drag.is_some() || matches!(self.mode, Mode::Dialog(_) | Mode::Conflict(_)) {
+        if self.drag.is_some() || matches!(self.mode, Mode::Conflict(_)) {
+            return false;
+        }
+        if let Mode::Dialog(_) = self.mode {
+            if !right {
+                self.dialog_click(x, y);
+                self.invalidate();
+            }
             return false;
         }
         self.cancel_pending_rename();
@@ -118,9 +125,10 @@ impl App {
                 self.sort_by(p, key);
             }
             Hit::Gear if !right => self.open_options(),
+            Hit::Hint(id) if !right => self.run_hint(id),
             Hit::Drive(p) | Hit::Path(p) | Hit::Scrollbar(p) | Hit::Panel(p) | Hit::Header(p, _) => self.active = p,
             Hit::CommandLine if !right => self.click_command_line(x),
-            Hit::Popup(_) | Hit::Gear | Hit::CommandLine | Hit::Nothing => {}
+            Hit::Popup(_) | Hit::Gear | Hit::Hint(_) | Hit::CommandLine | Hit::Nothing => {}
         }
         self.invalidate();
         capture

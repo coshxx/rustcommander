@@ -15,7 +15,7 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::GetDpiForSystem;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetCapture, ReleaseCapture, SetCapture, SetFocus, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VIRTUAL_KEY,
-    VK_SHIFT,
+    VK_MENU, VK_SHIFT,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{HSTRING, PCWSTR, w};
@@ -240,6 +240,11 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
         }
         WM_KEYDOWN => done(cell.with(|app| app.on_key(VIRTUAL_KEY(wp.0 as u16)))),
         WM_SYSKEYDOWN => done(cell.with(|app| app.on_syskey(VIRTUAL_KEY(wp.0 as u16)))),
+        // Alt released: the key bar switches back.
+        WM_KEYUP | WM_SYSKEYUP if wp.0 == VK_MENU.0 as usize => {
+            cell.with(|app| app.on_alt_up());
+            default()
+        }
         // Alt alone must not enter the (non-existent) menu.
         WM_SYSCOMMAND if (wp.0 & 0xfff0) as u32 == SC_KEYMENU && lp.0 == 0 => LRESULT(0),
         WM_SYSCOMMAND if wp.0 & 0xfff0 == IDM_OPTIONS => {

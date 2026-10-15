@@ -35,12 +35,13 @@ thread touches.
 | `app/layout.rs` | Sizes (DIPs), panel geometry, hit-testing, scrollbar geometry. |
 | `app/text_input.rs` | Single-line text field with a selection. |
 | `app/rename.rs` | Inline renaming (slow second click on a name). |
+| `app/packing.rs` | Pack (Alt+F5) and unpack (Alt+F9) dialogs: target, choice rows (format, level, own folder), starting the job. |
 | `app/command_line.rs` | The command line (option): keys, internal commands (`D:`, `cd`), running in a console, history. |
 | `app/format.rs` | Pure helpers: size/date formatting, name checks, path parsing. |
 | `ui/` | Drawing only – reads `App`, never changes it. `paint()` redraws the whole window. |
 | `panel.rs` | One file list: directory, entries, cursor, scroll position, marks, quick search. |
 | `files/` | Files, but not operations on them: listing directories (`listing`), file search (`find`), folder sizes and the shared directory reader `scan` (`dirsize`), sort order (`sort`, pure and tested), archives as read-only directories (`archive`), UTF-16 names and natural sort (`names`), marking masks (`mask`), change notifications (`watch`), temp files for opening entries of archives (`temp`). |
-| `ops/` | File operations on a worker thread: `copy`, `moving`, `delete`, `extract` (from archives); `mod.rs` holds the public API (`Job`, `Handle`, `Event`) and the shared worker logic. |
+| `ops/` | File operations on a worker thread: `copy`, `moving`, `delete`, `extract` (from archives), `pack` (into a new zip/7z, unpacking whole archives); `mod.rs` holds the public API (`Job`, `Handle`, `Event`) and the shared worker logic. |
 | `lister/` | The F3 viewer: its own windows (`window`), state and commands (`mod.rs`), input, drawing, the byte → screen line logic (`text`, pure and tested) and the search (`search`). |
 | `sys/` | Thin safe wrappers around Win32 (`win`), Direct2D/DirectWrite (`gfx`), libarchive from Windows' `archiveint.dll` (`libarchive`), memory-mapped files (`mapped`) and the shell context menu (`shell_menu`). |
 | `config/` | Settings file `config.json` (`mod.rs`, incl. `Options`), the command line history `history.json` (`history`) and a minimal JSON parser/writer (`json`). |
@@ -79,7 +80,10 @@ instead, which `files::archive::index` reads once with libarchive and caches. Th
 carries the archive path; a panel with `archive` set is read-only, so `app/dialogs.rs` turns F5
 into `Job::Extract` and refuses everything that would write. Extraction is one sequential pass
 over the archive (`ops/extract.rs`); entry paths go through `archive::clean_path`, which rejects
-anything that could leave the destination.
+anything that could leave the destination. Alt+F9 unpacks whole archives the same way
+(`ops/pack.rs`, `Job::Unpack`). Alt+F5 writes a new archive through `sys::libarchive::Writer`
+(`Job::Pack`): one header per folder and file, the data streamed in 256 KB blocks; on cancel or a
+write error the writer is marked failed (no trailer is written) and the file deleted.
 
 ## Lister windows
 

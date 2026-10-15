@@ -20,7 +20,12 @@
     "drive": { "key": "Alt+F1/F2", "label": "Laufwerk" },
     "path": { "key": "Strg+L", "label": "Pfad" },
     "find": { "key": "Alt+F7", "label": "Suchen" },
-    "options": { "key": "Strg+,", "label": "Optionen" }
+    "options": { "key": "Strg+,", "label": "Optionen" },
+    "drive_left": { "key": "Alt+F1", "label": "Laufwerk links" },
+    "drive_right": { "key": "Alt+F2", "label": "Laufwerk rechts" },
+    "quit": { "key": "Alt+F4", "label": "Beenden" },
+    "pack": { "key": "Alt+F5", "label": "Packen" },
+    "unpack": { "key": "Alt+F9", "label": "Entpacken" }
   },
   "panel": {
     "loading": "lädt …",
@@ -61,9 +66,23 @@
     "edit_in": "Datei in {dir} öffnen oder neu anlegen:",
     "mask_hint": "Maske, z. B. *.bmp;*.png · Ordner: \\ am Ende · | schließt aus",
     "delete_button": "Löschen",
+    "pack": "Packen",
+    "unpack": "Entpacken",
+    "pack_to": "{what} packen nach:",
+    "unpack_to": "{what} entpacken nach:",
+    "format": "Format",
+    "level": "Stufe",
+    "subdir": "Jedes Archiv in eigenen Unterordner",
+    "next_field": "Nächstes Feld",
     "quoted": "„{name}“",
     "items_one": "{n} Element",
     "items_other": "{n} Elemente"
+  },
+  "pack": {
+    "store": "Speichern",
+    "fast": "Schnell",
+    "normal": "Normal",
+    "max": "Maximal"
   },
   "conflict": {
     "title": "Ziel existiert bereits",
@@ -96,7 +115,10 @@
     "no_folder": "Ordner nicht gefunden: {path}",
     "no_drive": "Laufwerk {drive} ist nicht verfügbar",
     "command_failed": "„{command}“ kann nicht ausgeführt werden: {error}",
-    "temp": "Temp-Ordner: {error}"
+    "temp": "Temp-Ordner: {error}",
+    "pack_in_archive": "Packen geht nur außerhalb von Archiven",
+    "unpack_in_archive": "Im Archiv entpackt F5",
+    "no_archives": "Keine Archive ausgewählt"
   },
   "options": {
     "title": "Optionen",
@@ -162,6 +184,8 @@
     "unknown": "unbekannter Fehler",
     "encrypted_archive": "Verschlüsseltes Archiv – Passwörter werden noch nicht unterstützt",
     "is_folder": "ist ein Ordner",
-    "context_menu": "Kontextmenü nicht verfügbar"
+    "context_menu": "Kontextmenü nicht verfügbar",
+    "invalid_source": "ungültiger Quellpfad",
+    "file_changed": "Datei hat sich beim Lesen geändert"
   }
 }

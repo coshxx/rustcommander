@@ -1,5 +1,6 @@
 //! Where things are on screen: sizes in DIPs, panel geometry and hit-testing.
 
+use crate::app::dialogs::Dialog;
 use crate::app::format::utf16;
 use crate::app::{App, Mode};
 use crate::files::sort::SortKey;
@@ -56,9 +57,25 @@ pub(crate) enum Hit {
     Popup(usize),
     /// Gear button in the key bar.
     Gear,
+    /// Entry of the key bar (its id, see `HINTS`).
+    Hint(&'static str),
     /// The command line.
     CommandLine,
     Nothing,
+}
+
+/// Height of a choice row in a dialog and the width of its label.
+pub(crate) const DIALOG_ROW_H: f32 = 34.0;
+pub(crate) const DIALOG_LABEL_W: f32 = 96.0;
+
+/// Parts of a small dialog (DIPs).
+pub(crate) struct DialogLayout {
+    pub(crate) card: Rect,
+    pub(crate) input: Option<Rect>,
+    /// Choice rows below the input.
+    pub(crate) rows: Vec<Rect>,
+    /// Top of the key chip row.
+    pub(crate) chips_y: f32,
 }
 
 /// Parts of the search dialog (DIPs).
@@ -152,7 +169,11 @@ impl App {
         }
         if y >= h - KEYBAR_H {
             let g = gear_rect(w, h);
-            return if x >= g.left && x < g.right { Hit::Gear } else { Hit::Nothing };
+            if x >= g.left && x < g.right {
+                return Hit::Gear;
+            }
+            let hint = self.hint_rects(w, h).into_iter().find(|(_, chip, label)| x >= chip.left && x < label.right);
+            return hint.map_or(Hit::Nothing, |(id, ..)| Hit::Hint(id));
         }
         let p = if x < self.panel_x(1, w).0 { 0 } else { 1 };
         let (px, _) = self.panel_x(p, w);
@@ -195,6 +216,61 @@ impl App {
         let thumb_h = (lh * p.rows_visible as f32 / p.entries.len() as f32).max(THUMB_MIN_H).min(lh);
         let thumb_y = top + (lh - thumb_h) * p.top as f32 / p.max_top() as f32;
         Some(ScrollBar { zone: rect(x + pw - SCROLL_ZONE_W, top, SCROLL_ZONE_W, lh), thumb_y, thumb_h })
+    }
+
+    /// Title, message, input, choice rows and key chips of dialog `d`.
+    pub(crate) fn dialog_layout(&self, d: &Dialog, w: f32, h: f32) -> DialogLayout {
+        let dw = (w - 48.0).clamp(200.0, 600.0);
+        let input_h = if d.input.is_some() { 44.0 } else { 0.0 };
+        let n = d.extra.rows();
+        let dh = 20.0 + 28.0 + 26.0 + input_h + n as f32 * DIALOG_ROW_H + 44.0;
+        let card = rect(((w - dw) / 2.0).floor(), ((h - dh) / 2.5).floor(), dw, dh);
+        let x = card.left + 20.0;
+        let iw = dw - 40.0;
+        let mut y = card.top + 16.0 + 28.0 + 30.0;
+        let input = d.input.as_ref().map(|_| rect(x, y, iw, 32.0));
+        y += input_h;
+        let rows = (0..n).map(|i| rect(x, y + i as f32 * DIALOG_ROW_H, iw, DIALOG_ROW_H)).collect();
+        DialogLayout { card, input, rows, chips_y: y + n as f32 * DIALOG_ROW_H }
+    }
+
+    /// The choice buttons of a dialog row, right of its label.
+    pub(crate) fn segment_rects(&self, row: Rect, labels: &[&str]) -> Vec<Rect> {
+        let mut x = row.left + DIALOG_LABEL_W;
+        labels
+            .iter()
+            .map(|l| {
+                let sw = self.gfx.measure(&utf16(l), &self.gfx.fonts.small_center) + 24.0;
+                let r = rect(x, row.top + 4.0, sw, row.bottom - row.top - 8.0);
+                x += sw + 4.0;
+                r
+            })
+            .collect()
+    }
+
+    /// Key bar entries that fit (id, key chip, label), left to right: the Alt keys while Alt is
+    /// held.
+    pub(crate) fn hint_rects(&self, w: f32, h: f32) -> Vec<(&'static str, Rect, Rect)> {
+        let Some(widths) = &self.hint_widths else { return Vec::new() };
+        let (ids, widths) = if self.alt_down {
+            (&crate::ui::widgets::ALT_HINTS[..], &widths[1])
+        } else {
+            (&crate::ui::widgets::HINTS[..], &widths[0])
+        };
+        let y = h - KEYBAR_H;
+        let mut x = PAD;
+        let mut out = Vec::new();
+        for (id, (kw, lw)) in ids.iter().zip(widths) {
+            let chip_w = kw + 12.0;
+            if x + chip_w + lw + 6.0 > w - GEAR_W - 12.0 {
+                break;
+            }
+            let chip = rect(x, y + 6.0, chip_w, KEYBAR_H - 12.0);
+            x += chip_w + 6.0;
+            out.push((*id, chip, rect(x, y, lw + 2.0, KEYBAR_H)));
+            x += lw + 18.0;
+        }
+        out
     }
 
     /// The search dialog in a `w` × `h` window: nearly the whole window.

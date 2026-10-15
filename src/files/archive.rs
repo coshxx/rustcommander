@@ -23,6 +23,18 @@ pub fn is_archive_name(name: &[u16]) -> bool {
     EXTENSIONS.iter().any(|ext| name.len() > ext.len() && name.ends_with(ext))
 }
 
+/// The name without its archive extension (`fotos.tar.gz` → `fotos`).
+pub fn stem(name: &str) -> &str {
+    let lower = name.to_lowercase();
+    EXTENSIONS
+        .iter()
+        .filter(|ext| lower.len() > ext.len() && lower.ends_with(*ext))
+        .map(|ext| ext.len())
+        .max()
+        .and_then(|n| name.get(..name.len() - n))
+        .unwrap_or(name)
+}
+
 /// Splits a path into the archive file and the path inside it (`\`-separated, `""` for the
 /// archive's root). `None` if no part of the path is an archive file.
 pub fn split(path: &Path) -> Option<(PathBuf, String)> {

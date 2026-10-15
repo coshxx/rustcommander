@@ -10,6 +10,7 @@ use self::json::Value;
 use crate::files::sort::{Sort, SortKey};
 use crate::i18n::Lang;
 use crate::lister;
+use crate::ops::pack::{Format, Level};
 
 #[derive(Default)]
 pub struct Config {
@@ -27,6 +28,23 @@ pub struct Config {
     pub lister: lister::Settings,
     /// What can be switched in the options dialog (Ctrl+,).
     pub options: Options,
+    /// Last choices in the pack and unpack dialogs.
+    pub pack: PackSettings,
+}
+
+/// Choices of the pack (Alt+F5) and unpack (Alt+F9) dialogs, kept for the next time.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct PackSettings {
+    pub format: Format,
+    pub level: Level,
+    /// Unpack each archive into a folder of its own.
+    pub subdir: bool,
+}
+
+impl Default for PackSettings {
+    fn default() -> PackSettings {
+        PackSettings { format: Format::Zip, level: Level::Normal, subdir: true }
+    }
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
@@ -115,6 +133,14 @@ impl Config {
             cfg.lister.window = l.get("window").and_then(parse_window);
             cfg.lister.wrap = bool_at(l, "wrap").unwrap_or(cfg.lister.wrap);
         }
+        if let Some(p) = root.get("pack") {
+            let d = PackSettings::default();
+            cfg.pack = PackSettings {
+                format: str_at(p, "format").and_then(|f| Format::from_id(&f)).unwrap_or(d.format),
+                level: str_at(p, "level").and_then(|l| Level::from_id(&l)).unwrap_or(d.level),
+                subdir: bool_at(p, "subdir").unwrap_or(d.subdir),
+            };
+        }
         if let Some(o) = root.get("options") {
             let d = Options::default();
             cfg.options = Options {
@@ -168,6 +194,15 @@ impl Config {
             options.push(("language", Value::Str(l.id().into())));
         }
         members.push(("options", obj(options)));
+        let p = self.pack;
+        members.push((
+            "pack",
+            obj(vec![
+                ("format", Value::Str(p.format.id().into())),
+                ("level", Value::Str(p.level.id().into())),
+                ("subdir", Value::Bool(p.subdir)),
+            ]),
+        ));
         obj(members)
     }
 
@@ -200,6 +235,7 @@ mod tests {
                 command_line: true,
                 language: Some(Lang::De),
             },
+            pack: PackSettings { format: Format::SevenZip, level: Level::Max, subdir: false },
         };
         let back = Config::parse(&cfg.to_json().to_pretty());
         assert_eq!(back.paths, cfg.paths);
@@ -211,6 +247,7 @@ mod tests {
         assert!(!back.lister.wrap);
         assert_eq!(back.options, cfg.options);
         assert_eq!(back.sorts, cfg.sorts);
+        assert_eq!(back.pack, cfg.pack);
     }
 
     #[test]
@@ -224,6 +261,7 @@ mod tests {
         assert!(cfg.lister.wrap);
         assert_eq!(cfg.options, Options { alt_search: true, ..Options::default() });
         assert_eq!(cfg.sorts, [Sort::default(); 2]);
+        assert_eq!(cfg.pack, PackSettings::default());
     }
 
     #[test]

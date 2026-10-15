@@ -4,7 +4,7 @@
 use crate::app::App;
 use crate::app::Mode;
 use crate::app::format::utf16;
-use crate::app::layout::{GEAR_W, KEYBAR_H, PAD, gear_rect};
+use crate::app::layout::{KEYBAR_H, gear_rect};
 use crate::app::text_input::TextInput;
 use crate::i18n::lookup;
 use crate::sys::gfx::{Canvas, Gfx, Rect, rect};
@@ -14,6 +14,9 @@ use crate::theme::Theme;
 /// (`keybar.options`) are the gear button at the right end instead.
 pub(crate) const HINTS: [&str; 13] =
     ["tab", "view", "edit", "mark", "select", "copy", "move", "rename", "mkdir", "delete", "drive", "path", "find"];
+
+/// The key bar while Alt is held.
+pub(crate) const ALT_HINTS: [&str; 6] = ["drive_left", "drive_right", "quit", "pack", "find", "unpack"];
 
 /// Key and label of a key bar entry in the current language.
 pub(crate) fn hint(id: &str) -> (&'static str, &'static str) {
@@ -81,20 +84,11 @@ impl App {
             c.fill_round(gear, 4.0, t.cursor_inactive);
         }
         c.text(&[0xE713], &c.fonts.icon, gear, if lit { t.accent } else { t.text_dim });
-        let Some(widths) = &self.hint_widths else { return };
-        let mut x = PAD;
-        for (id, (kw, lw)) in HINTS.iter().zip(widths) {
+        for (id, chip, label_r) in self.hint_rects(w, h) {
             let (key, label) = hint(id);
-            let chip_w = kw + 12.0;
-            if x + chip_w + lw + 6.0 > w - GEAR_W - 12.0 {
-                break;
-            }
-            let chip = rect(x, y + 6.0, chip_w, KEYBAR_H - 12.0);
             c.fill_round(chip, 4.0, t.popup_bg);
             c.text_str(key, &c.fonts.small_center, chip, t.accent);
-            x += chip_w + 6.0;
-            c.text_str(label, &c.fonts.small, rect(x, y, lw + 2.0, KEYBAR_H), t.text_dim);
-            x += lw + 18.0;
+            c.text_str(label, &c.fonts.small, label_r, t.text_dim);
         }
     }
 

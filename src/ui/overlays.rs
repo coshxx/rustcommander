@@ -3,14 +3,14 @@
 
 use std::path::Path;
 
-use crate::app::dialogs::{Dialog, DialogKind, DrivePopup};
+use crate::app::dialogs::{Dialog, DialogKind, DrivePopup, Extra};
 use crate::app::format::format_size;
 use crate::app::jobs::JOB_CARD_DELAY_MS;
-use crate::app::layout::{CARD_W, ICON_W, OPTION_H, OPTIONS_ROWS_Y, ROW_H, STATUS_H};
+use crate::app::layout::{CARD_W, DIALOG_LABEL_W, ICON_W, OPTION_H, OPTIONS_ROWS_Y, ROW_H, STATUS_H};
 use crate::app::options::{LANGUAGE_ROW, ROWS, SWITCHES, is_disabled, is_on};
 use crate::app::{App, Tone};
 use crate::i18n::{self, Lang, t, tf};
-use crate::sys::gfx::{Canvas, rect};
+use crate::sys::gfx::{Canvas, Rect, rect};
 use crate::ui::widgets::{draw_card, draw_chips, draw_input};
 
 /// Icon and label for a drive type (`GetDriveTypeW`).
@@ -29,26 +29,60 @@ impl App {
     pub(crate) fn draw_dialog(&self, c: &Canvas, d: &Dialog, w: f32, h: f32, caret_x: Option<f32>) {
         let t = self.theme;
         c.fill(rect(0.0, 0.0, w, h), crate::theme::rgba(0x000000, 0.35));
-        let dw = (w - 48.0).clamp(200.0, 600.0);
-        let input_h = if d.input.is_some() { 44.0 } else { 0.0 };
-        let dh = 20.0 + 28.0 + 26.0 + input_h + 44.0;
-        let r = rect(((w - dw) / 2.0).floor(), ((h - dh) / 2.5).floor(), dw, dh);
+        let l = self.dialog_layout(d, w, h);
+        let r = l.card;
         draw_card(c, t, r);
         let x = r.left + 20.0;
-        let iw = dw - 40.0;
+        let iw = r.right - r.left - 40.0;
         let mut y = r.top + 16.0;
         let danger = d.kind == DialogKind::Delete { recycle: false };
         c.text_str(d.kind.title(), &c.fonts.path, rect(x, y, iw, 28.0), if danger { t.error } else { t.text });
         y += 28.0;
         c.text_str(&d.message, &c.fonts.name, rect(x, y, iw, 26.0), t.text_dim);
-        y += 30.0;
-        if let (Some(input), Some(cx)) = (&d.input, caret_x) {
-            draw_input(c, &self.gfx, t, rect(x, y, iw, 32.0), input, Some(cx));
-            y += input_h;
+        if let (Some(input), Some(ir)) = (&d.input, l.input) {
+            // `caret_x` is `None` while a choice row has the focus.
+            draw_input(c, &self.gfx, t, ir, input, caret_x);
+        }
+        for (i, row) in l.rows.iter().enumerate() {
+            self.draw_choice_row(c, d, i, *row);
         }
         let ok =
             i18n::t(if matches!(d.kind, DialogKind::Delete { .. }) { "dialog.delete_button" } else { "common.ok" });
-        draw_chips(c, &self.gfx, t, x, y, 28.0, &[("Enter", ok), ("Esc", i18n::t("common.cancel"))]);
+        let mut chips = vec![("Enter", ok), ("Esc", i18n::t("common.cancel"))];
+        if !l.rows.is_empty() {
+            chips.push(("Tab", i18n::t("dialog.next_field")));
+        }
+        draw_chips(c, &self.gfx, t, x, l.chips_y, 28.0, &chips);
+    }
+
+    /// Row `i` below a dialog's input: a label and buttons (one lit), or a checkbox.
+    fn draw_choice_row(&self, c: &Canvas, d: &Dialog, i: usize, row: Rect) {
+        let t = self.theme;
+        let focused = d.focus == i + 1;
+        let label_col = if focused { t.accent } else { t.text_dim };
+        let chosen = d.extra.chosen(i);
+        if let Extra::Unpack { .. } = d.extra {
+            // Segoe Fluent Icons: empty box / box with check mark.
+            let (glyph, col) = if chosen == 1 { (0xE73A, t.accent) } else { (0xE739, t.text_dim) };
+            c.text(&[glyph], &c.fonts.icon, rect(row.left, row.top, ICON_W, row.bottom - row.top), col);
+            let lr = rect(row.left + ICON_W + 8.0, row.top, row.right - row.left - ICON_W - 8.0, row.bottom - row.top);
+            c.text_str(d.extra.row_label(i), &c.fonts.name, lr, if focused { t.accent } else { t.text });
+            return;
+        }
+        let lr = rect(row.left, row.top, DIALOG_LABEL_W, row.bottom - row.top);
+        c.text_str(d.extra.row_label(i), &c.fonts.name, lr, label_col);
+        let labels = d.extra.labels(i);
+        for (j, (sr, label)) in self.segment_rects(row, &labels).into_iter().zip(&labels).enumerate() {
+            if j == chosen {
+                c.fill_round(sr, 4.0, t.cursor_active);
+                if focused {
+                    c.stroke_round(sr, 4.0, 1.0, t.accent);
+                }
+            } else {
+                c.fill_round(sr, 4.0, t.edit_bg);
+            }
+            c.text_str(label, &c.fonts.small_center, sr, if j == chosen { t.text } else { t.text_dim });
+        }
     }
 
     /// Title, the language row, one checkbox row per switch (`sel` highlighted), key chips; the

@@ -1,5 +1,6 @@
 //! Modal interactions: drive popup, path editing and the small dialogs
-//! (copy, move, delete, rename, new directory, new file, mark by mask).
+//! (copy, move, delete, rename, new directory, new file, mark by mask; pack and unpack are in
+//! `packing.rs`).
 
 use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
@@ -37,6 +38,10 @@ pub(crate) enum DialogKind {
     Select {
         add: bool,
     },
+    /// Alt+F5: pack into a new archive.
+    Pack,
+    /// Alt+F9: unpack whole archives.
+    Unpack,
 }
 
 impl DialogKind {
@@ -52,6 +57,8 @@ impl DialogKind {
             DialogKind::NewFile => "dialog.edit",
             DialogKind::Select { add: true } => "dialog.mark",
             DialogKind::Select { add: false } => "dialog.unmark",
+            DialogKind::Pack => "dialog.pack",
+            DialogKind::Unpack => "dialog.unpack",
         })
     }
 }
@@ -62,6 +69,24 @@ pub(crate) struct Dialog {
     pub(crate) sources: Vec<PathBuf>,
     pub(crate) message: String,
     pub(crate) input: Option<TextInput>,
+    /// Choice rows below the input (pack and unpack dialog).
+    pub(crate) extra: Extra,
+    /// 0 = the input, 1.. = a choice row (Tab moves).
+    pub(crate) focus: usize,
+}
+
+/// What a dialog shows below its input.
+pub(crate) enum Extra {
+    None,
+    /// Format and compression level.
+    Pack {
+        format: crate::ops::pack::Format,
+        level: crate::ops::pack::Level,
+    },
+    /// "Each archive into its own folder".
+    Unpack {
+        subdir: bool,
+    },
 }
 
 impl App {
@@ -123,6 +148,8 @@ impl App {
                 self.notify(t("notice.read_only").into(), Tone::Info);
                 return;
             }
+            DialogKind::Pack => return self.open_pack(),
+            DialogKind::Unpack => return self.open_unpack(),
             _ => kind,
         };
         let p = &self.panels[a];
@@ -171,12 +198,13 @@ impl App {
                 let msg = t("dialog.mask_hint").to_string();
                 (Vec::new(), msg, Some(TextInput::selected(utf16(&self.mask))))
             }
+            DialogKind::Pack | DialogKind::Unpack => return,
         };
         if sources.is_empty() && !matches!(kind, DialogKind::MkDir | DialogKind::NewFile | DialogKind::Select { .. }) {
             return;
         }
         self.panels[a].search.clear();
-        self.mode = Mode::Dialog(Dialog { kind, panel: a, sources, message, input });
+        self.mode = Mode::Dialog(Dialog { kind, panel: a, sources, message, input, extra: Extra::None, focus: 0 });
     }
 
     /// Enter in a dialog: start the job (or apply the mask).
@@ -188,12 +216,16 @@ impl App {
             self.apply_mask(d.panel, input, add);
             return;
         }
+        if matches!(d.kind, DialogKind::Pack | DialogKind::Unpack) {
+            self.commit_archive_dialog(d);
+            return;
+        }
         if d.kind == DialogKind::NewFile {
             self.new_file(d.panel, input);
             return;
         }
         let job = match d.kind {
-            DialogKind::Select { .. } | DialogKind::NewFile => return,
+            DialogKind::Select { .. } | DialogKind::NewFile | DialogKind::Pack | DialogKind::Unpack => return,
             DialogKind::Copy | DialogKind::Extract | DialogKind::Move => {
                 let Some(dest) = parse_path(&utf16(&input), &dir) else { return };
                 if self.panels.iter().any(|p| p.archive.as_ref().is_some_and(|a| dest.starts_with(a))) {

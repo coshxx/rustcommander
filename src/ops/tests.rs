@@ -321,3 +321,66 @@ fn archive_paths_never_leave_the_destination() {
     assert!(!t.0.join("out/evil.txt").exists());
     assert!(!t.0.parent().unwrap().join("evil2.txt").exists());
 }
+
+#[test]
+fn pack_and_unpack_round_trip() {
+    if !libarchive_available() {
+        return;
+    }
+    use pack::{Format, Level};
+    let t = Scratch::new("pack");
+    write(&t.0.join("src/Übersicht.txt"), "Grüße");
+    write(&t.0.join("src/sub/b.txt"), &"B".repeat(100_000));
+    fs::create_dir_all(t.0.join("src/leer")).unwrap();
+    write(&t.0.join("einzeln.txt"), "1");
+    for (format, level) in [(Format::Zip, Level::Normal), (Format::Zip, Level::Store), (Format::SevenZip, Level::Max)] {
+        let archive = t.0.join(format!("out-{}.{}", level.id(), format.id()));
+        let sources = vec![t.0.join("src"), t.0.join("einzeln.txt")];
+        let (s, _) = run(Job::Pack { sources: sources.clone(), dest: archive.clone(), format, level }, Answer::Skip);
+        assert!(s.errors.is_empty(), "{:?}", s.errors);
+        assert_eq!((s.done, s.select.as_deref()), (2, Some(archive.as_path())));
+        let mut top: Vec<String> = names_in(&archive).into_iter().filter(|n| n != "..").collect();
+        top.sort();
+        assert_eq!(top, ["einzeln.txt", "src"]);
+
+        // Exists already: "skip" keeps the old archive.
+        let (s, conflicts) = run(Job::Pack { sources, dest: archive.clone(), format, level }, Answer::Skip);
+        assert_eq!((s.done, conflicts), (0, 1));
+        assert!(archive.is_file());
+
+        let dest = t.0.join(format!("unpacked-{}-{}", format.id(), level.id()));
+        let (s, _) =
+            run(Job::Unpack { archives: vec![archive.clone()], dest: dest.clone(), subdir: true }, Answer::Skip);
+        assert!(s.errors.is_empty(), "{:?}", s.errors);
+        let root = dest.join(format!("out-{}", level.id()));
+        assert_eq!(s.select.as_deref(), Some(root.as_path()));
+        assert_eq!(fs::read_to_string(root.join("src/Übersicht.txt")).unwrap(), "Grüße");
+        assert_eq!(fs::read_to_string(root.join("src/sub/b.txt")).unwrap().len(), 100_000);
+        assert!(root.join("src/leer").is_dir());
+        assert_eq!(fs::read_to_string(root.join("einzeln.txt")).unwrap(), "1");
+    }
+}
+
+#[test]
+fn pack_into_a_packed_folder_leaves_the_archive_out() {
+    if !libarchive_available() {
+        return;
+    }
+    let t = Scratch::new("pack-self");
+    write(&t.0.join("a.txt"), "A");
+    let archive = t.0.join("self.zip");
+    let job = Job::Pack {
+        sources: vec![t.0.clone()],
+        dest: archive.clone(),
+        format: pack::Format::Zip,
+        level: pack::Level::Fast,
+    };
+    let (s, _) = run(job, Answer::Skip);
+    assert!(s.errors.is_empty(), "{:?}", s.errors);
+    let dest = t.0.join("x");
+    let (s, _) = run(Job::Unpack { archives: vec![archive], dest: dest.clone(), subdir: false }, Answer::Skip);
+    assert!(s.errors.is_empty(), "{:?}", s.errors);
+    let name = t.0.file_name().unwrap();
+    assert!(dest.join(name).join("a.txt").is_file());
+    assert!(!dest.join(name).join("self.zip").exists());
+}

@@ -11,6 +11,7 @@ mod keyboard;
 pub(crate) mod layout;
 pub(crate) mod mouse;
 pub(crate) mod options;
+pub(crate) mod packing;
 pub(crate) mod rename;
 mod sizes;
 pub(crate) mod text_input;
@@ -27,7 +28,7 @@ use crate::app::layout::ROW_H;
 use crate::app::mouse::Drag;
 use crate::app::rename::{InlineRename, PendingRename};
 use crate::app::text_input::TextInput;
-use crate::config::{Config, Options};
+use crate::config::{Config, Options, PackSettings};
 use crate::files::archive::is_archive_name;
 use crate::files::listing::{Kind, Loaded};
 use crate::files::sort::SortKey;
@@ -128,8 +129,9 @@ pub struct App {
     /// Results from the directory loader threads (see `LoadSink`).
     loaded_rx: Receiver<Loaded>,
     pub(crate) theme: &'static Theme,
-    /// Measured once: widths of the key and label of each key bar hint.
-    pub(crate) hint_widths: Option<Vec<(f32, f32)>>,
+    /// Measured once per language: widths of the key and label of each key bar hint (normal,
+    /// Alt).
+    pub(crate) hint_widths: Option<[Vec<(f32, f32)>; 2]>,
     /// The file operation in progress (at most one at a time).
     pub(crate) job: Option<RunningJob>,
     /// Result message shown for a few seconds after a job.
@@ -146,6 +148,10 @@ pub struct App {
     pub(crate) hover_header: Option<(usize, SortKey)>,
     /// Mouse over the gear button in the key bar.
     pub(crate) hover_gear: bool,
+    /// Alt is held: the key bar shows the Alt+F keys.
+    pub(crate) alt_down: bool,
+    /// Last choices in the pack / unpack dialog.
+    pub(crate) pack: PackSettings,
     /// A click that may start an inline rename (see `rename.rs`).
     pub(crate) pending_rename: Option<PendingRename>,
     /// Time, panel and row of the last left click on a row (double clicks are told apart from
@@ -212,6 +218,8 @@ impl App {
             hover_bar: None,
             hover_header: None,
             hover_gear: false,
+            alt_down: false,
+            pack: cfg.pack,
             pending_rename: None,
             last_click: None,
             cmdline: TextInput::new(Vec::new()),
@@ -239,6 +247,7 @@ impl App {
             editor: Some(self.editor.clone()),
             lister: crate::lister::settings(),
             options: self.options,
+            pack: self.pack,
             sorts: [self.panels[0].sort, self.panels[1].sort],
             ..Default::default()
         };

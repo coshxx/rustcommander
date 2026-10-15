@@ -163,6 +163,8 @@ impl App {
     /// `WM_KILLFOCUS`: finish the rename (on failure the input stays open).
     pub fn on_focus_lost(&mut self) {
         self.cancel_pending_rename();
+        // Alt+Tab: the Alt release goes to the other window.
+        self.on_alt_up();
         if let Mode::Rename(_) = self.mode {
             self.commit_rename();
             self.invalidate();

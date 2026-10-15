@@ -55,6 +55,9 @@ the steady-state frame time).
   sorting by name descending). The sort column shows ▲/▼; saved per panel in `config.json`.
 - Hidden/system files: dimmed.
 - UI language: English or German (see Languages below).
+- Key bar: the most used keys; a click on an entry does what its key does. While Alt is held it
+  shows the Alt keys instead (Alt+F1/F2 drives, Alt+F4 quit, Alt+F5 pack, Alt+F7 search, Alt+F9
+  unpack); AltGr does not switch it.
 
 ## Controls (v0.1)
 
@@ -91,7 +94,9 @@ the steady-state frame time).
 | Esc (otherwise) | Cancel running folder size counts |
 | Ctrl+F3 / Ctrl+F6 / Ctrl+F5 | Sort by name / size / date; again = other direction |
 | Shift+F10, menu key | Shell context menu (Shift held: extended entries) |
+| Alt+F5 | Pack the marked entries into a zip or 7z archive (see Archives) |
 | Alt+F7 | File search (see below) |
+| Alt+F9 | Unpack the marked archives (see Archives) |
 | Ctrl+, | Options (see below); also the gear button at the right end of the key bar and "Options…" in the window menu |
 
 ### Command line (option)
@@ -198,7 +203,8 @@ On startup the last directories and the window position are restored
     "lister": { "window": { … }, "wrap": true },
     "editor": "notepad.exe",
     "options": { "exact_sizes": false, "alt_search": false, "sort_dirs": false, "space_stays": false,
-                 "command_line": false, "language": "en" }
+                 "command_line": false, "language": "en" },
+    "pack": { "format": "zip", "level": "normal", "subdir": true }
   }
   ```
 
@@ -300,6 +306,33 @@ without a dot. Num+ adds to the existing marks, Num− only removes matches. The
 - Encrypted archives: the listing is shown if readable; extracting encrypted entries reports
   "Passwörter werden noch nicht unterstützt".
 
+### Packing (Alt+F5)
+
+- Packs the marked entries (else the one under the cursor; nothing on `..`) into a new archive,
+  written with the same libarchive. Not inside archives.
+- Dialog: the target (default `<other pane>\<name>.zip`; name = the single file's name without
+  extension or the single folder's name, for several entries the current folder's name), **Format** zip / 7z (switching
+  changes the extension in the target) and **Stufe** Speichern / Schnell / Normal / Maximal
+  (level 0 / 1 / 6 / 9; zip uses Deflate, 7z LZMA2). Tab moves between input and rows, ←/→
+  picks, a click picks too. Format and level are remembered (`"pack"` in `config.json`).
+- The entries are at the archive's top level, folders with everything below them; file times
+  are kept, names are stored as UTF-8 (zip) / UTF-16 (7z). An archive inside a packed folder
+  leaves itself out.
+- An existing target: the conflict question (overwrite replaces it, adding to an archive is not
+  supported). Progress and cancel like copying; a cancelled or failed archive is deleted. A file
+  that can't be opened is reported and left out. Afterwards the cursor is on the new archive.
+- No passwords, no "move into archive".
+
+### Unpacking (Alt+F9)
+
+- Unpacks the marked archives (else the one under the cursor) completely; marked entries that
+  aren't archives are skipped, with none at all a notice says so. Not inside archives (F5
+  extracts there).
+- Dialog: the target (default: the other pane's folder) and **Jedes Archiv in eigenen
+  Unterordner** (default on, remembered): `fotos.zip` goes to `<target>\fotos\`.
+- One job for all archives with progress, cancel and the conflict question; encrypted entries are
+  reported and skipped. With one archive into its own folder the cursor lands on that folder.
+
 ## Lister (F3)
 
 A separate, non-modal window per file, like Total Commander's Lister; any number can be open.
@@ -330,6 +363,6 @@ Closing the main window closes them.
 ## Deliberately later
 
 Lister: selecting and copying text, images, following growing files, N/P for the next/previous
-file, line numbers, hex search (`4D 5A`). Archives: packing (Alt+F5) and writing into archives, password dialog, archives inside archives,
+file, line numbers, hex search (`4D 5A`). Archives: adding to existing archives, password dialog, archives inside archives,
 7-Zip's `7z.dll` as a fallback for Windows 10. Parallel copying of many small files, system icons (async, cached), live filter, light theme, normalizing path casing
 (typed `c:\windows` → `C:\Windows`), partial redraws (if frame time on large windows becomes an issue).
