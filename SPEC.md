@@ -88,6 +88,7 @@ the steady-state frame time).
 | Esc (while a job runs) | Cancel the job |
 | Esc (otherwise) | Cancel running folder size counts |
 | Ctrl+F3 / Ctrl+F6 / Ctrl+F5 | Sort by name / size / date; again = other direction |
+| Shift+F10, menu key | Shell context menu (Shift held: extended entries) |
 | Ctrl+, | Options (see below) |
 
 ### Mouse
@@ -97,6 +98,7 @@ the steady-state frame time).
 | Click / double-click | Set cursor / open |
 | Right click | Set cursor and toggle mark |
 | Right drag | Every row passed gets the state of the first one; scrolls automatically past the list's edges |
+| Right press held 0.5 s on a row | Shell context menu (the row's mark is undone) |
 | Wheel | Scrolls the view only; the cursor stays on its entry (may leave the view). The next key press brings it back. |
 | Scrollbar | Drag the thumb; click the track to page towards the mouse (auto-repeat after the system keyboard delay, stops at the mouse). Wider and brighter on hover. |
 
@@ -156,6 +158,17 @@ On startup the last directories and the window position are restored
 
   Unknown keys are ignored, missing ones get their default, a broken file gives all defaults.
   An old `config.ini` is not read.
+
+### Shell context menu (long right press, Shift+F10, menu key)
+
+- Explorer's menu (incl. 7-Zip, "Öffnen mit", "Senden an" …) for the marked entries, else the
+  entry under the cursor; on `..` for the directory itself. Not inside archives.
+- Long right press: the menu opens at the mouse while the button is still held; releasing it
+  chooses nothing. Keyboard: below the cursor row.
+- "Umbenennen" opens the app's own rename dialog (the shell's only works inside Explorer); every
+  other command is run by the shell. Changes show up through the directory watcher.
+- The menu runs its own message loop, so it is opened from `window.rs` outside of `AppCell::with`;
+  submenu messages are forwarded to `IContextMenu3`. The UI thread is OLE-initialized (copy/cut).
 
 ### File masks (Num+ / Num−)
 
@@ -235,6 +248,5 @@ Closing the main window closes them.
 
 Lister: selecting and copying text, images, following growing files, N/P for the next/previous
 file, line numbers, hex search (`4D 5A`). Archives: packing (Alt+F5) and writing into archives, password dialog, archives inside archives,
-7-Zip's `7z.dll` as a fallback for Windows 10. Parallel copying of many small files, shell context
-menu (long right press / Shift+F10, since a right click marks), system icons (async, cached), live filter, light theme, normalizing path casing
+7-Zip's `7z.dll` as a fallback for Windows 10. Parallel copying of many small files, system icons (async, cached), live filter, light theme, normalizing path casing
 (typed `c:\windows` → `C:\Windows`), partial redraws (if frame time on large windows becomes an issue).

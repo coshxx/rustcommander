@@ -20,6 +20,7 @@ use windows::Win32::UI::WindowsAndMessaging::WM_APP;
 
 use crate::app::dialogs::{Dialog, DrivePopup};
 use crate::app::jobs::{AfterJob, RunningJob};
+use crate::app::layout::ROW_H;
 use crate::app::mouse::Drag;
 use crate::app::text_input::TextInput;
 use crate::config::{Config, Options};
@@ -41,6 +42,8 @@ pub const WM_APP_JOB: u32 = WM_APP + 2;
 pub const WM_APP_DIRCHANGED: u32 = WM_APP + 3;
 /// Posted to itself: open the files in `App::view_requests` in lister windows.
 pub const WM_APP_VIEW: u32 = WM_APP + 4;
+/// Posted to itself: show the shell context menu of `App::context_request`.
+pub const WM_APP_CONTEXT: u32 = WM_APP + 6;
 
 // Timer IDs (`WM_TIMER`).
 const TIMER_LOADING: usize = 1;
@@ -51,6 +54,8 @@ pub(crate) const TIMER_JOB: usize = 5;
 pub(crate) const TIMER_DRAG: usize = 6;
 /// Repaint while folder sizes are being counted.
 const TIMER_SIZES: usize = 7;
+/// Right button held this long on a row: shell context menu instead of marking.
+pub(crate) const TIMER_LONG_PRESS: usize = 8;
 
 /// Directory change notifications trigger at most one reload per this interval.
 const REFRESH_THROTTLE_MS: u32 = 250;
@@ -77,6 +82,14 @@ pub(crate) enum Tone {
     Success,
     Info,
     Error,
+}
+
+/// Shell context menu to show (by `window.rs`, outside of `AppCell::with`).
+pub(crate) struct ContextRequest {
+    /// Items of one directory.
+    pub(crate) paths: Vec<PathBuf>,
+    /// Where to open it, in DIPs relative to the window.
+    pub(crate) at: (f32, f32),
 }
 
 pub(crate) struct Notice {
@@ -123,6 +136,8 @@ pub struct App {
     pub(crate) swallow_next_char: bool,
     /// Files to open in a lister (F3); opened by `window.rs` on `WM_APP_VIEW`.
     pub(crate) view_requests: Vec<PathBuf>,
+    /// Shell context menu to open; shown by `window.rs` on `WM_APP_CONTEXT`.
+    pub(crate) context_request: Option<ContextRequest>,
     /// For `--timing`: the first frame / the first frame with both panels loaded was drawn.
     pub(crate) painted: bool,
     pub(crate) painted_content: bool,
@@ -167,6 +182,7 @@ impl App {
             options: cfg.options,
             swallow_next_char: false,
             view_requests: Vec::new(),
+            context_request: None,
             painted: false,
             painted_content: false,
         };
@@ -280,6 +296,7 @@ impl App {
                 self.drag_tick();
             }
             TIMER_SIZES => self.arm_sizes_timer(),
+            TIMER_LONG_PRESS => self.long_press(),
             _ if TIMER_REFRESH.contains(&id) => {
                 let i = if id == TIMER_REFRESH[0] { 0 } else { 1 };
                 self.refresh_armed[i] = false;
@@ -329,6 +346,41 @@ impl App {
     pub(crate) fn request_view(&mut self, path: PathBuf) {
         self.view_requests.push(path);
         SendHwnd::new(self.hwnd).post(WM_APP_VIEW);
+    }
+
+    /// Shell context menu for the marked entries, else the one under the cursor (on `..`: the
+    /// directory itself). `at` = mouse position; `None` = below the cursor row (keyboard).
+    pub(crate) fn request_context_menu(&mut self, at: Option<(f32, f32)>) {
+        let a = self.active;
+        let p = &mut self.panels[a];
+        if p.archive.is_some() {
+            self.notify("Kein Kontextmenü in Archiven".into(), Tone::Info);
+            return;
+        }
+        let mut paths = p.targets();
+        if paths.is_empty() && !p.dir.as_os_str().is_empty() {
+            paths.push(p.dir.clone());
+        }
+        if paths.is_empty() {
+            return;
+        }
+        p.search.clear();
+        p.ensure_visible();
+        let at = at.unwrap_or_else(|| {
+            let (w, h) = self.gfx.size_dips(self.hwnd);
+            let p = &self.panels[a];
+            let row = (p.cursor - p.top) as f32;
+            (self.columns(a, w).name_x + 16.0, Self::list_area(h).0 + (row + 1.0) * ROW_H)
+        });
+        self.context_request = Some(ContextRequest { paths, at });
+        SendHwnd::new(self.hwnd).post(WM_APP_CONTEXT);
+    }
+
+    /// Menu key or Shift+F10 (`WM_CONTEXTMENU` from the keyboard).
+    pub fn on_context_key(&mut self) {
+        if matches!(self.mode, Mode::Normal) {
+            self.request_context_menu(None);
+        }
     }
 
     /// Ctrl+PgDn: like Enter, but only for directories and archives.

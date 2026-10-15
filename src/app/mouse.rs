@@ -1,10 +1,12 @@
 //! Mouse input: clicks, right-click marking, scrollbar dragging and the wheel.
 
 use crate::app::layout::{Hit, ROW_H};
-use crate::app::{App, Mode, TIMER_DRAG};
+use crate::app::{App, Mode, TIMER_DRAG, TIMER_LONG_PRESS};
 use crate::sys::win;
 
 const DRAG_REPEAT_MS: u32 = 50;
+/// Right button held this long on one row opens the shell context menu.
+const LONG_PRESS_MS: u32 = 500;
 
 /// Mouse interaction while a button is held (the window has the mouse capture).
 #[derive(Clone, Copy)]
@@ -13,8 +15,9 @@ pub(crate) enum Drag {
     Thumb { panel: usize, grab: f32 },
     /// Left button held on the track: page towards the mouse, auto-repeating.
     Page { panel: usize, y: f32 },
-    /// Right button held: every row the mouse passes gets `marked`.
-    Mark { panel: usize, marked: bool, last: usize, y: f32 },
+    /// Right button held: every row the mouse passes gets `marked`. `origin` = row and position
+    /// of the press (a long press there opens the context menu instead).
+    Mark { panel: usize, marked: bool, last: usize, y: f32, origin: (usize, f32, f32) },
 }
 
 impl App {
@@ -57,7 +60,8 @@ impl App {
                 panel.set_cursor(row);
                 let marked = !panel.entries[row].marked;
                 panel.set_mark(row, marked);
-                self.drag = Some(Drag::Mark { panel: p, marked, last: row, y });
+                self.drag = Some(Drag::Mark { panel: p, marked, last: row, y, origin: (row, x, y) });
+                win::set_timer(self.hwnd, TIMER_LONG_PRESS, LONG_PRESS_MS);
                 capture = true;
             }
             Hit::Row(p, row) => {
@@ -101,6 +105,7 @@ impl App {
         if self.drag.take().is_some() {
             self.invalidate();
         }
+        win::kill_timer(self.hwnd, TIMER_LONG_PRESS);
         if self.drag_timer_armed {
             win::kill_timer(self.hwnd, TIMER_DRAG);
             self.drag_timer_armed = false;
@@ -220,10 +225,24 @@ impl App {
         }
     }
 
+    /// `TIMER_LONG_PRESS`: still holding the right button on the row it was pressed on? Undo
+    /// its mark and open the shell context menu there.
+    pub(crate) fn long_press(&mut self) {
+        let Some(Drag::Mark { panel, marked, last, origin: (row, x, y), .. }) = self.drag else { return };
+        if last != row {
+            return;
+        }
+        self.panels[panel].set_mark(row, !marked);
+        // `window.rs` releases the mouse capture before the menu opens.
+        self.cancel_drag();
+        self.active = panel;
+        self.request_context_menu(Some((x, y)));
+    }
+
     /// Right-drag: mark every row from the last one up to the row under the mouse
     /// (clamped to the visible rows) and put the cursor there.
     fn extend_mark(&mut self) {
-        let Some(Drag::Mark { panel, marked, last, y }) = self.drag else { return };
+        let Some(Drag::Mark { panel, marked, last, y, origin }) = self.drag else { return };
         let (_, h) = self.gfx.size_dips(self.hwnd);
         let (top, _) = Self::list_area(h);
         let p = &mut self.panels[panel];
@@ -239,7 +258,7 @@ impl App {
             p.set_mark(i, marked);
         }
         p.cursor = row;
-        self.drag = Some(Drag::Mark { panel, marked, last: row, y });
+        self.drag = Some(Drag::Mark { panel, marked, last: row, y, origin });
         self.invalidate();
     }
 
