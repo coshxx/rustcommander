@@ -35,6 +35,7 @@ thread touches.
 | `app/layout.rs` | Sizes (DIPs), panel geometry, hit-testing, scrollbar geometry. |
 | `app/text_input.rs` | Single-line text field with a selection. |
 | `app/rename.rs` | Inline renaming (slow second click on a name). |
+| `app/command_line.rs` | The command line (option): keys, internal commands (`D:`, `cd`), running in a console, history. |
 | `app/format.rs` | Pure helpers: size/date formatting, name checks, path parsing. |
 | `ui/` | Drawing only – reads `App`, never changes it. `paint()` redraws the whole window. |
 | `panel.rs` | One file list: directory, entries, cursor, scroll position, marks, quick search. |
@@ -42,7 +43,7 @@ thread touches.
 | `ops/` | File operations on a worker thread: `copy`, `moving`, `delete`, `extract` (from archives); `mod.rs` holds the public API (`Job`, `Handle`, `Event`) and the shared worker logic. |
 | `lister/` | The F3 viewer: its own windows (`window`), state and commands (`mod.rs`), input, drawing, the byte → screen line logic (`text`, pure and tested) and the search (`search`). |
 | `sys/` | Thin safe wrappers around Win32 (`win`), Direct2D/DirectWrite (`gfx`), libarchive from Windows' `archiveint.dll` (`libarchive`), memory-mapped files (`mapped`) and the shell context menu (`shell_menu`). |
-| `config/` | Settings file `config.json` (`mod.rs`, incl. `Options`) and a minimal JSON parser/writer (`json`). |
+| `config/` | Settings file `config.json` (`mod.rs`, incl. `Options`), the command line history `history.json` (`history`) and a minimal JSON parser/writer (`json`). |
 | `i18n.rs`, `../i18n/*.json` | Translations: current language, `t` / `tf` / `tn` lookups; texts embedded from the JSON files. |
 | `theme.rs`, `timing.rs` | Colors, `--timing` measurements. |
 

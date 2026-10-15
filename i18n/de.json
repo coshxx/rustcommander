@@ -93,6 +93,9 @@
     "editor_failed": "Editor „{editor}“ startet nicht: {error}",
     "no_context_menu": "Kein Kontextmenü in Archiven",
     "exists": "„{name}“ existiert bereits",
+    "no_folder": "Ordner nicht gefunden: {path}",
+    "no_drive": "Laufwerk {drive} ist nicht verfügbar",
+    "command_failed": "„{command}“ kann nicht ausgeführt werden: {error}",
     "temp": "Temp-Ordner: {error}"
   },
   "options": {
@@ -102,6 +105,7 @@
     "alt_search": "Schnellsuche nur mit Alt+Buchstabe",
     "sort_dirs": "Ordner in die Sortierung einschließen",
     "space_stays": "Leertaste markiert ohne weiterzuspringen",
+    "command_line": "Kommandozeile anzeigen",
     "toggle": "Umschalten",
     "choose": "Auswählen"
   },

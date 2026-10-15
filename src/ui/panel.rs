@@ -1,7 +1,7 @@
 //! Drawing one panel: path bar, column headers, file rows, scrollbar, status bar.
 
 use crate::app::format::{format_bytes, format_date, format_size};
-use crate::app::layout::{CHIP_W, COLS_H, Columns, DATE_W, ICON_W, KEYBAR_H, PAD, PATH_H, ROW_H, STATUS_H};
+use crate::app::layout::{CHIP_W, COLS_H, Columns, DATE_W, ICON_W, PAD, PATH_H, ROW_H, STATUS_H};
 use crate::app::mouse::Drag;
 use crate::app::{App, LOADING_DELAY_MS, Mode};
 use crate::files::listing::{Entry, Kind};
@@ -126,7 +126,7 @@ impl App {
     /// Only the visible rows (plus one partially visible) are drawn.
     fn draw_rows(&self, c: &Canvas, a: &Area, cols: &Columns, h: f32, caret_x: Option<f32>) {
         let p = a.panel;
-        let (top, lh) = Self::list_area(h);
+        let (top, lh) = self.list_area(h);
         c.clip(rect(a.x, top, a.width, lh));
         let end = (p.top + p.rows_visible + 1).min(p.entries.len());
         for (r, idx) in (p.top..end).enumerate() {
@@ -192,7 +192,7 @@ impl App {
         let t = self.theme;
         let i = a.index;
         let Some(sb) = self.scrollbar(i, w, h) else { return };
-        let (top, lh) = Self::list_area(h);
+        let (top, lh) = self.list_area(h);
         let dragging = matches!(self.drag, Some(Drag::Thumb { panel, .. }) if panel == i);
         let paging = matches!(self.drag, Some(Drag::Page { panel, .. }) if panel == i);
         let hot = dragging || paging || (self.drag.is_none() && self.hover_bar == Some(i));
@@ -216,7 +216,7 @@ impl App {
         let f = c.fonts;
         let p = a.panel;
         let (x, pw) = (a.x, a.width);
-        let sy = h - KEYBAR_H - STATUS_H;
+        let sy = h - self.footer_h() - STATUS_H;
         c.fill(rect(x, sy, pw, STATUS_H), t.bar_bg);
         c.fill(rect(x, sy, pw, 1.0), t.divider);
         let mut status_w = pw - 2.0 * PAD;

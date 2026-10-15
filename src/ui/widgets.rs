@@ -113,4 +113,17 @@ impl App {
         c.stroke_round(r, 5.0, 1.0, t.popup_border);
         c.text_str(&text, &c.fonts.small_center, r, t.text);
     }
+
+    /// The command line: prompt (active panel's path) and input; the caret only while no dialog
+    /// is open.
+    pub(crate) fn draw_command_line(&self, c: &Canvas, w: f32, h: f32) {
+        let t = self.theme;
+        let (bar, prompt, input) = self.command_line_layout(w, h);
+        c.fill(bar, t.bar_bg);
+        c.fill(rect(0.0, bar.top, w, 1.0), t.divider);
+        c.text_str(&self.prompt(), &c.fonts.name, prompt, t.text_dim);
+        let caret =
+            matches!(self.mode, Mode::Normal).then(|| self.gfx.caret_x(&self.cmdline.text[..self.cmdline.caret]));
+        draw_input(c, &self.gfx, t, input, &self.cmdline, caret);
+    }
 }

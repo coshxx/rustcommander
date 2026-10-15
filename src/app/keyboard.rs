@@ -110,7 +110,10 @@ impl App {
         if !matches!(vk, VK_SHIFT | VK_CONTROL | VK_MENU | VK_LWIN | VK_RWIN) {
             self.bring_cursor_into_view();
         }
-        let handled = self.cursor_key(vk, ctrl, shift) || self.mark_key(vk, ctrl) || self.command_key(vk, ctrl, shift);
+        let handled = (self.options.command_line && self.command_line_key(vk, ctrl, shift))
+            || self.cursor_key(vk, ctrl, shift)
+            || self.mark_key(vk, ctrl)
+            || self.command_key(vk, ctrl, shift);
         if handled {
             self.arm_loading_indicator();
         }
@@ -265,6 +268,10 @@ impl App {
         if c < 0x20 || c == 0x7f {
             return;
         }
+        if matches!(self.mode, Mode::Normal) && self.options.command_line && self.command_line_char(c) {
+            self.invalidate();
+            return;
+        }
         match &mut self.mode {
             Mode::Drives(d) => {
                 let hit = d.drives.iter().position(|dr| fold_case(dr.root[0]) == fold_case(c));
@@ -300,8 +307,9 @@ impl App {
                     self.arm_loading_indicator();
                 } else if c == b' ' as u16 && p.search.is_empty() {
                     self.space();
-                } else if !self.options.alt_search || !p.search.is_empty() {
-                    // With the Alt option, plain characters only continue a running search.
+                } else if !(self.options.alt_search || self.options.command_line) || !p.search.is_empty() {
+                    // With the Alt option (or the command line), plain characters only continue a
+                    // running search.
                     p.search_push(c);
                 }
             }
@@ -309,10 +317,12 @@ impl App {
         self.invalidate();
     }
 
-    /// Alt+character: starts or continues the quick search if the Alt option is on.
+    /// Alt+character: starts or continues the quick search if the Alt option or the command line
+    /// is on.
     /// `false` = not used (Alt+Space must still open the system menu).
     pub fn on_syschar(&mut self, c: u16) -> bool {
-        if !self.options.alt_search || !matches!(self.mode, Mode::Normal) || c <= 0x20 || c == 0x7f {
+        let alt = self.options.alt_search || self.options.command_line;
+        if !alt || !matches!(self.mode, Mode::Normal) || c <= 0x20 || c == 0x7f {
             return false;
         }
         self.panels[self.active].search_push(c);

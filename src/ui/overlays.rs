@@ -6,8 +6,8 @@ use std::path::Path;
 use crate::app::dialogs::{Dialog, DialogKind, DrivePopup};
 use crate::app::format::format_size;
 use crate::app::jobs::JOB_CARD_DELAY_MS;
-use crate::app::layout::{CARD_W, ICON_W, KEYBAR_H, OPTION_H, OPTIONS_ROWS_Y, ROW_H, STATUS_H};
-use crate::app::options::{LANGUAGE_ROW, ROWS, SWITCHES, is_on};
+use crate::app::layout::{CARD_W, ICON_W, OPTION_H, OPTIONS_ROWS_Y, ROW_H, STATUS_H};
+use crate::app::options::{LANGUAGE_ROW, ROWS, SWITCHES, is_disabled, is_on};
 use crate::app::{App, Tone};
 use crate::i18n::{self, Lang, t, tf};
 use crate::sys::gfx::{Canvas, rect};
@@ -77,9 +77,14 @@ impl App {
             }
             let i = row - 1;
             // Segoe Fluent Icons: empty box / box with check mark.
-            let (glyph, col) = if is_on(self.options, i) { (0xE73A, t.accent) } else { (0xE739, t.text_dim) };
+            let (glyph, mut col) = if is_on(self.options, i) { (0xE73A, t.accent) } else { (0xE739, t.text_dim) };
+            let mut text = t.text;
+            if is_disabled(self.options, i) {
+                col.a = 0.4;
+                text = t.text_dim;
+            }
             c.text(&[glyph], &c.fonts.icon, rect(x, y, ICON_W, OPTION_H), col);
-            c.text_str(i18n::t(SWITCHES[i]), &c.fonts.name, rect(label_x, y, iw - ICON_W - 8.0, OPTION_H), t.text);
+            c.text_str(i18n::t(SWITCHES[i]), &c.fonts.name, rect(label_x, y, iw - ICON_W - 8.0, OPTION_H), text);
         }
         let y = r.top + OPTIONS_ROWS_Y + ROWS as f32 * OPTION_H + 12.0;
         let action = i18n::t(if sel == LANGUAGE_ROW { "options.choose" } else { "options.toggle" });
@@ -132,7 +137,7 @@ impl App {
         let t = self.theme;
         let cw = CARD_W.min(w - 32.0);
         let x = w - cw - 16.0;
-        let bottom = h - KEYBAR_H - STATUS_H - 12.0;
+        let bottom = h - self.footer_h() - STATUS_H - 12.0;
         if let Some(job) = &self.job {
             if job.started.elapsed().as_millis() < JOB_CARD_DELAY_MS as u128 {
                 return;

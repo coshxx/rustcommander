@@ -1,6 +1,7 @@
 //! Settings file `%APPDATA%\RustCommander\config.json`. Missing or broken values fall back to
 //! the defaults; unknown keys are ignored.
 
+pub mod history;
 pub(crate) mod json;
 
 use std::path::PathBuf;
@@ -38,6 +39,8 @@ pub struct Options {
     pub sort_dirs: bool,
     /// Space marks without moving the cursor down (Insert still moves).
     pub space_stays: bool,
+    /// Command line above the key bar; typing goes there, quick search needs Alt.
+    pub command_line: bool,
     /// UI language chosen in the options; `None` = follow the Windows language.
     pub language: Option<Lang>,
 }
@@ -119,6 +122,7 @@ impl Config {
                 alt_search: bool_at(o, "alt_search").unwrap_or(d.alt_search),
                 sort_dirs: bool_at(o, "sort_dirs").unwrap_or(d.sort_dirs),
                 space_stays: bool_at(o, "space_stays").unwrap_or(d.space_stays),
+                command_line: bool_at(o, "command_line").unwrap_or(d.command_line),
                 language: str_at(o, "language").and_then(|l| Lang::from_id(&l)),
             };
         }
@@ -157,6 +161,7 @@ impl Config {
             ("alt_search", Value::Bool(o.alt_search)),
             ("sort_dirs", Value::Bool(o.sort_dirs)),
             ("space_stays", Value::Bool(o.space_stays)),
+            ("command_line", Value::Bool(o.command_line)),
         ];
         // Only once chosen; until then the Windows language is used.
         if let Some(l) = o.language {
@@ -192,6 +197,7 @@ mod tests {
                 alt_search: false,
                 sort_dirs: true,
                 space_stays: true,
+                command_line: true,
                 language: Some(Lang::De),
             },
         };

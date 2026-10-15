@@ -1,5 +1,6 @@
 //! Where things are on screen: sizes in DIPs, panel geometry and hit-testing.
 
+use crate::app::format::utf16;
 use crate::app::{App, Mode};
 use crate::files::sort::SortKey;
 use crate::sys::gfx::{Rect, rect};
@@ -10,6 +11,8 @@ pub(crate) const COLS_H: f32 = 24.0;
 pub(crate) const ROW_H: f32 = 24.0;
 pub(crate) const STATUS_H: f32 = 26.0;
 pub(crate) const KEYBAR_H: f32 = 30.0;
+/// The command line (option) between the status bars and the key bar.
+pub(crate) const CMD_H: f32 = 34.0;
 const SIZE_W: f32 = 84.0;
 /// Size column with exact byte counts (option); fits `≥ 99.999.999.999.999`.
 const SIZE_W_EXACT: f32 = 140.0;
@@ -53,6 +56,8 @@ pub(crate) enum Hit {
     Popup(usize),
     /// Gear button in the key bar.
     Gear,
+    /// The command line.
+    CommandLine,
     Nothing,
 }
 
@@ -94,15 +99,37 @@ impl App {
     }
 
     /// Top and height of the file list area in a window `h` DIPs high.
-    pub(crate) fn list_area(h: f32) -> (f32, f32) {
+    pub(crate) fn list_area(&self, h: f32) -> (f32, f32) {
         let top = PATH_H + COLS_H;
-        (top, (h - KEYBAR_H - STATUS_H - top).max(0.0))
+        (top, (h - self.footer_h() - STATUS_H - top).max(0.0))
+    }
+
+    /// Height below the status bars: the key bar and, if shown, the command line.
+    pub(crate) fn footer_h(&self) -> f32 {
+        KEYBAR_H + if self.options.command_line { CMD_H } else { 0.0 }
+    }
+
+    /// The command line prompt: the active panel's path and `>`.
+    pub(crate) fn prompt(&self) -> String {
+        format!("{}>", self.panels[self.active].shown_path().display())
+    }
+
+    /// The command line: (whole bar, prompt, input box).
+    pub(crate) fn command_line_layout(&self, w: f32, h: f32) -> (Rect, Rect, Rect) {
+        let y = h - KEYBAR_H - CMD_H;
+        let pw = (self.gfx.measure(&utf16(&self.prompt()), &self.gfx.fonts.name) + 4.0).min(w * 0.45);
+        let input_x = PAD + pw + 4.0;
+        (
+            rect(0.0, y, w, CMD_H),
+            rect(PAD, y, pw, CMD_H),
+            rect(input_x, y + 4.0, (w - PAD - input_x).max(0.0), CMD_H - 8.0),
+        )
     }
 
     /// After a resize: rows per page; keeps the scroll position valid.
     pub fn layout(&mut self) {
         let (_, h) = self.gfx.size_dips(self.hwnd);
-        let rows = (Self::list_area(h).1 / ROW_H).floor().max(1.0) as usize;
+        let rows = (self.list_area(h).1 / ROW_H).floor().max(1.0) as usize;
         for p in &mut self.panels {
             p.rows_visible = rows;
             // Only clamp: the user may have scrolled the cursor out of view on purpose.
@@ -119,6 +146,9 @@ impl App {
             if x >= r.left && x < r.right && y >= r.top + 4.0 && y < r.bottom - 4.0 {
                 return Hit::Popup(((y - r.top - 4.0) / ROW_H) as usize);
             }
+        }
+        if self.options.command_line && y >= h - KEYBAR_H - CMD_H && y < h - KEYBAR_H {
+            return Hit::CommandLine;
         }
         if y >= h - KEYBAR_H {
             let g = gear_rect(w, h);
@@ -141,7 +171,7 @@ impl App {
             };
             return Hit::Header(p, key);
         }
-        let (top, lh) = Self::list_area(h);
+        let (top, lh) = self.list_area(h);
         if y >= top && y < top + lh {
             if self.scrollbar(p, w, h).is_some_and(|sb| x >= sb.zone.left) {
                 return Hit::Scrollbar(p);
@@ -157,7 +187,7 @@ impl App {
     /// Scrollbar geometry; `None` if everything fits.
     pub(crate) fn scrollbar(&self, i: usize, w: f32, h: f32) -> Option<ScrollBar> {
         let p = &self.panels[i];
-        let (top, lh) = Self::list_area(h);
+        let (top, lh) = self.list_area(h);
         if p.entries.len() <= p.rows_visible || lh <= 0.0 {
             return None;
         }

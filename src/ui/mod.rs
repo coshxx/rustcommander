@@ -10,7 +10,6 @@ use std::time::Instant;
 use windows::Win32::UI::WindowsAndMessaging::WM_CLOSE;
 
 use crate::app::format::utf16;
-use crate::app::layout::KEYBAR_H;
 use crate::app::{App, Mode};
 use crate::sys::gfx::rect;
 use crate::sys::win::SendHwnd;
@@ -54,8 +53,11 @@ impl App {
         for i in 0..2 {
             self.draw_panel(&c, i, w, h, caret_x);
         }
-        c.fill(rect(self.panel_x(1, w).0 - 1.0, 0.0, 1.0, h - KEYBAR_H), self.theme.divider);
+        c.fill(rect(self.panel_x(1, w).0 - 1.0, 0.0, 1.0, h - self.footer_h()), self.theme.divider);
         self.draw_keybar(&c, w, h);
+        if self.options.command_line {
+            self.draw_command_line(&c, w, h);
+        }
         self.draw_job_or_notice(&c, w, h);
         match &self.mode {
             Mode::Drives(d) => self.draw_drives(&c, d, w),

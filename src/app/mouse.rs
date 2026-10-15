@@ -119,7 +119,8 @@ impl App {
             }
             Hit::Gear if !right => self.open_options(),
             Hit::Drive(p) | Hit::Path(p) | Hit::Scrollbar(p) | Hit::Panel(p) | Hit::Header(p, _) => self.active = p,
-            Hit::Popup(_) | Hit::Gear | Hit::Nothing => {}
+            Hit::CommandLine if !right => self.click_command_line(x),
+            Hit::Popup(_) | Hit::Gear | Hit::CommandLine | Hit::Nothing => {}
         }
         self.invalidate();
         capture
@@ -163,7 +164,7 @@ impl App {
                 self.extend_mark();
                 // Outside the list: the timer keeps scrolling and marking.
                 let (_, h) = self.gfx.size_dips(self.hwnd);
-                let (top, lh) = Self::list_area(h);
+                let (top, lh) = self.list_area(h);
                 if y < top || y >= top + lh {
                     self.arm_drag_timer(DRAG_REPEAT_MS);
                 }
@@ -209,7 +210,7 @@ impl App {
             }
             Some(Drag::Mark { panel, y, .. }) => {
                 let (_, h) = self.gfx.size_dips(self.hwnd);
-                let (top, lh) = Self::list_area(h);
+                let (top, lh) = self.list_area(h);
                 if y < top || y >= top + lh {
                     // Farther outside the list = faster.
                     let dist = if y < top { top - y } else { y - (top + lh) };
@@ -256,7 +257,7 @@ impl App {
     fn drag_thumb(&mut self, p: usize, thumb_y: f32) {
         let (w, h) = self.gfx.size_dips(self.hwnd);
         let Some(sb) = self.scrollbar(p, w, h) else { return };
-        let (top, lh) = Self::list_area(h);
+        let (top, lh) = self.list_area(h);
         let range = lh - sb.thumb_h;
         let frac = if range > 0.0 { ((thumb_y - top) / range).clamp(0.0, 1.0) } else { 0.0 };
         let panel = &mut self.panels[p];
@@ -286,7 +287,7 @@ impl App {
     fn extend_mark(&mut self) {
         let Some(Drag::Mark { panel, marked, last, y, origin }) = self.drag else { return };
         let (_, h) = self.gfx.size_dips(self.hwnd);
-        let (top, _) = Self::list_area(h);
+        let (top, _) = self.list_area(h);
         let p = &mut self.panels[panel];
         let len = p.entries.len();
         if len == 0 {

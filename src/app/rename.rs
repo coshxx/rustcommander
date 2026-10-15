@@ -174,7 +174,7 @@ impl App {
         let Mode::Rename(r) = &self.mode else { return false };
         let (w, h) = self.gfx.size_dips(self.hwnd);
         let p = &self.panels[r.panel];
-        let (top, _) = Self::list_area(h);
+        let (top, _) = self.list_area(h);
         let Some(vis) = r.row.checked_sub(p.top) else { return false };
         let c = self.columns(r.panel, w);
         let ry = top + vis as f32 * ROW_H;

@@ -93,6 +93,9 @@
     "editor_failed": "Cannot start the editor “{editor}”: {error}",
     "no_context_menu": "No context menu inside archives",
     "exists": "“{name}” already exists",
+    "no_folder": "Folder not found: {path}",
+    "no_drive": "Drive {drive} is not available",
+    "command_failed": "Cannot run “{command}”: {error}",
     "temp": "Temp folder: {error}"
   },
   "options": {
@@ -102,6 +105,7 @@
     "alt_search": "Quick search only with Alt+letter",
     "sort_dirs": "Include folders in the sort order",
     "space_stays": "Space marks without moving down",
+    "command_line": "Show command line",
     "toggle": "Toggle",
     "choose": "Choose"
   },

@@ -94,6 +94,28 @@ the steady-state frame time).
 | Alt+F7 | File search (see below) |
 | Ctrl+, | Options (see below); also the gear button at the right end of the key bar and "Options…" in the window menu |
 
+### Command line (option)
+
+- With **Show command line** (`command_line`, default off) a line sits between the status bars
+  and the key bar: the active pane's path as prompt (`C:\Intel>`), then the input. Clicking into
+  it places the caret. Like Total Commander, typing goes there; the quick search then needs
+  Alt+letter (the Alt option is greyed out meanwhile), a running quick search still takes plain
+  characters.
+- ↑/↓, PgUp/PgDn, Home/End and Insert keep steering the pane, ←/→ move the caret. With an empty
+  line Enter, Backspace, Del, Ctrl+A, Space, `\` and Shift+Enter do what they always do; with
+  text Enter runs it, Backspace/Del edit, Ctrl+A selects, Esc clears. Ctrl+V pastes.
+- Enter runs the line with `cmd /c` in a new console window in the active pane's folder (inside
+  an archive: the folder holding it); the window closes when the command is done. Shift+Enter
+  uses `cmd /k`, the window stays open.
+- Handled by the pane instead: `D:` (switch drive; stays in the folder if it is on that drive
+  already), `cd <path>` (also `cd..`, `cd\`, `cd /d`, relative, `%VARS%`) and a bare path of an
+  existing folder. A missing drive or folder shows a notice and keeps the text; otherwise the line
+  is cleared.
+- Ctrl+Enter inserts the name under the cursor, Ctrl+Shift+Enter its full path (quoted if they
+  contain spaces, followed by a space).
+- History: the last 50 lines (internal commands too, a repeated one moves up), Ctrl+↑/↓ browse
+  them. Saved in `history.json` next to `config.json`: `{ "commands": [newest, …] }`.
+
 ### Mouse
 
 | Action | Effect |
@@ -176,7 +198,7 @@ On startup the last directories and the window position are restored
     "lister": { "window": { … }, "wrap": true },
     "editor": "notepad.exe",
     "options": { "exact_sizes": false, "alt_search": false, "sort_dirs": false, "space_stays": false,
-                 "language": "en" }
+                 "command_line": false, "language": "en" }
   }
   ```
 

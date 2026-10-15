@@ -8,8 +8,8 @@ use crate::i18n::{self, Lang};
 /// Row of the language choice; the switches follow it.
 pub(crate) const LANGUAGE_ROW: usize = 0;
 /// Translation keys of the switches (rows 1..).
-pub(crate) const SWITCHES: [&str; 4] =
-    ["options.exact_sizes", "options.alt_search", "options.sort_dirs", "options.space_stays"];
+pub(crate) const SWITCHES: [&str; 5] =
+    ["options.exact_sizes", "options.alt_search", "options.sort_dirs", "options.space_stays", "options.command_line"];
 /// Rows of the dialog.
 pub(crate) const ROWS: usize = 1 + SWITCHES.len();
 
@@ -20,8 +20,17 @@ pub(crate) fn flag(o: &mut Options, i: usize) -> Option<&mut bool> {
         1 => Some(&mut o.alt_search),
         2 => Some(&mut o.sort_dirs),
         3 => Some(&mut o.space_stays),
+        4 => Some(&mut o.command_line),
         _ => None,
     }
+}
+
+/// Switch "quick search only with Alt+letter": has no effect while the command line is shown.
+pub(crate) const ALT_SEARCH: usize = 1;
+
+/// Whether switch `i` is greyed out (and can't be toggled).
+pub(crate) fn is_disabled(o: Options, i: usize) -> bool {
+    i == ALT_SEARCH && o.command_line
 }
 
 /// Whether switch `i` is on.
@@ -55,12 +64,17 @@ impl App {
 
     /// Flip switch `i`, select its row and save the config.
     fn toggle_option(&mut self, i: usize) {
+        if is_disabled(self.options, i) {
+            return;
+        }
         let Some(f) = flag(&mut self.options, i) else { return };
         *f = !*f;
         self.mode = Mode::Options { sel: i + 1, popup: None };
         for p in &mut self.panels {
             p.resort(self.options.sort_dirs);
         }
+        // The command line takes room from the file lists.
+        self.layout();
         self.config(self.hwnd).save();
     }
 

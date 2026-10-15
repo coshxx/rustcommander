@@ -2,6 +2,7 @@
 //! running job and notices. Input handling, layout and drawing live in the
 //! sibling modules and in `crate::ui`; they all extend `App` with more methods.
 
+pub(crate) mod command_line;
 pub(crate) mod dialogs;
 pub(crate) mod find;
 pub(crate) mod format;
@@ -150,6 +151,12 @@ pub struct App {
     /// Time, panel and row of the last left click on a row (double clicks are told apart from
     /// slow second clicks by this, see `rename.rs`).
     pub(crate) last_click: Option<(std::time::Instant, usize, usize)>,
+    /// The command line's text (option `command_line`).
+    pub(crate) cmdline: TextInput,
+    /// Commands run from it, newest first (`history.json`).
+    pub(crate) history: Vec<String>,
+    /// Entry of `history` shown while browsing with Ctrl+↑/↓.
+    pub(crate) history_pos: Option<usize>,
     /// Last mask used for Num+ / Num−.
     pub(crate) mask: String,
     /// Program for F4 (from config.json; Notepad by default).
@@ -207,6 +214,9 @@ impl App {
             hover_gear: false,
             pending_rename: None,
             last_click: None,
+            cmdline: TextInput::new(Vec::new()),
+            history: crate::config::history::load(),
+            history_pos: None,
             mask: cfg.mask.clone().unwrap_or_else(|| "*.*".into()),
             editor: cfg.editor.clone().unwrap_or_else(|| crate::config::DEFAULT_EDITOR.into()),
             options: cfg.options,
@@ -430,7 +440,7 @@ impl App {
             let (w, h) = self.gfx.size_dips(self.hwnd);
             let p = &self.panels[a];
             let row = (p.cursor - p.top) as f32;
-            (self.columns(a, w).name_x + 16.0, Self::list_area(h).0 + (row + 1.0) * ROW_H)
+            (self.columns(a, w).name_x + 16.0, self.list_area(h).0 + (row + 1.0) * ROW_H)
         });
         self.context_request = Some(ContextRequest { paths, at });
         SendHwnd::new(self.hwnd).post(WM_APP_CONTEXT);
