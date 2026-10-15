@@ -18,6 +18,7 @@ mod ui;
 mod window;
 
 use windows::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
+use windows::Win32::System::Ole::OleInitialize;
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow, SetProcessDpiAwarenessContext,
 };
@@ -42,6 +43,8 @@ fn main() {
 
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        // The shell context menu needs OLE on this thread (copy/cut use the OLE clipboard).
+        let _ = OleInitialize(None);
     }
     let cfg = Config::load();
     lister::set_settings(cfg.lister.clone());

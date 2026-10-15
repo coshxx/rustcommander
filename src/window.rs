@@ -8,17 +8,22 @@ use windows::Win32::Graphics::Dwm::{
     DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute,
 };
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, CreateSolidBrush, EndPaint, MONITOR_DEFAULTTONULL, MonitorFromRect, PAINTSTRUCT, ScreenToClient,
+    BeginPaint, ClientToScreen, CreateSolidBrush, EndPaint, MONITOR_DEFAULTTONULL, MonitorFromRect, PAINTSTRUCT,
+    ScreenToClient,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::GetDpiForSystem;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    ReleaseCapture, SetCapture, SetFocus, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VIRTUAL_KEY,
+    GetCapture, ReleaseCapture, SetCapture, SetFocus, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VIRTUAL_KEY,
+    VK_SHIFT,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{HSTRING, PCWSTR, w};
 
 use crate::app::App;
+use crate::app::dialogs::DialogKind;
+use crate::sys::shell_menu::{self, Chosen};
+use crate::sys::win;
 use crate::{app, lister, panel, theme};
 
 /// Resource ID of the icon in `res/app.rc`.
@@ -189,6 +194,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
     if let Some(result) = mouse_message(cell, hwnd, msg, wp, lp) {
         return result;
     }
+    if let Some(result) = shell_menu::handle_menu_msg(msg, wp, lp) {
+        return result;
+    }
     let default = || unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
     let done = |handled: Option<bool>| if handled == Some(true) { LRESULT(0) } else { default() };
 
@@ -249,6 +257,18 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
             open_listers(cell);
             LRESULT(0)
         }
+        app::WM_APP_CONTEXT => {
+            show_context_menu(cell, hwnd);
+            LRESULT(0)
+        }
+        // Menu key / Shift+F10 (lParam -1). Mouse clicks are handled without DefWindowProc, so
+        // they never get here.
+        WM_CONTEXTMENU => {
+            if lp.0 == -1 {
+                cell.with(|app| app.on_context_key());
+            }
+            LRESULT(0)
+        }
         WM_CLOSE => {
             // Listers first: they save their settings, which go into the config below.
             lister::close_all();
@@ -278,6 +298,33 @@ fn open_listers(cell: &AppCell) {
             cell.with(|app| app.notify(e, app::Tone::Error));
         }
     }
+}
+
+/// `WM_APP_CONTEXT`: the shell context menu. It runs its own message loop (which calls `wndproc`
+/// again), hence outside of `with`.
+fn show_context_menu(cell: &AppCell, hwnd: HWND) {
+    let Some(Some((req, dpi))) = cell.with(|app| app.context_request.take().map(|r| (r, app.gfx.dpi))) else {
+        return;
+    };
+    let k = dpi / 96.0;
+    let mut pt = POINT { x: (req.at.0 * k) as i32, y: (req.at.1 * k) as i32 };
+    unsafe {
+        let _ = ClientToScreen(hwnd, &mut pt);
+        // After a long right press the window still has the capture.
+        if GetCapture() == hwnd {
+            let _ = ReleaseCapture();
+        }
+    }
+    match shell_menu::show(hwnd, &req.paths, pt, win::key_down(VK_SHIFT)) {
+        Ok(Some(Chosen::Rename)) => {
+            cell.with(|app| app.open_dialog(DialogKind::Rename));
+        }
+        Ok(None) => {}
+        Err(e) => {
+            cell.with(|app| app.notify(e, app::Tone::Error));
+        }
+    }
+    cell.with(|app| app.invalidate());
 }
 
 /// Moving to a monitor with another DPI: new fonts/scale, then the size Windows suggests.
