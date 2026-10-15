@@ -55,6 +55,7 @@ impl App {
             Mode::Drives(d) => self.draw_drives(&c, d, w),
             Mode::Dialog(d) => self.draw_dialog(&c, d, w, h, caret_x),
             Mode::Conflict(path) => self.draw_conflict(&c, path, w, h),
+            Mode::Options { sel } => self.draw_options(&c, *sel, w, h),
             _ => {}
         }
         self.gfx.end();

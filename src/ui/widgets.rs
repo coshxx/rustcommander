@@ -8,7 +8,7 @@ use crate::app::text_input::TextInput;
 use crate::sys::gfx::{Canvas, Gfx, Rect, rect};
 use crate::theme::Theme;
 
-pub(crate) const HINTS: [(&str, &str); 11] = [
+pub(crate) const HINTS: [(&str, &str); 12] = [
     ("Tab", "Seite"),
     ("F3", "Ansehen"),
     ("Einfg", "Markieren"),
@@ -20,6 +20,7 @@ pub(crate) const HINTS: [(&str, &str); 11] = [
     ("F8", "Löschen"),
     ("Alt+F1/F2", "Laufwerk"),
     ("Strg+L", "Pfad"),
+    ("Strg+,", "Optionen"),
 ];
 
 /// Text input box with caret; scrolls horizontally to keep the caret visible.

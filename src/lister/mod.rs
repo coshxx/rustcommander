@@ -31,7 +31,7 @@ pub use window::{close_all, open};
 /// Posted to a lister window by its search thread (progress and result).
 const WM_APP_SEARCH: u32 = WM_APP + 1;
 
-/// What is saved in config.ini; shared by all lister windows.
+/// What is saved in config.json; shared by all lister windows.
 #[derive(Clone)]
 pub struct Settings {
     /// Normal window position (left, top, right, bottom) + maximized, of the last closed lister.
@@ -163,7 +163,7 @@ impl Lister {
         SendHwnd::new(self.hwnd).post(WM_CLOSE);
     }
 
-    /// Remember window position and wrapping for the next lister (and config.ini).
+    /// Remember window position and wrapping for the next lister (and config.json).
     fn save_settings(&self) {
         let window = crate::window::window_placement(self.hwnd);
         set_settings(Settings { window, wrap: self.wrap });

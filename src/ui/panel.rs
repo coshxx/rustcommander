@@ -1,10 +1,11 @@
 //! Drawing one panel: path bar, column headers, file rows, scrollbar, status bar.
 
-use crate::app::format::{format_date, format_size};
-use crate::app::layout::{CHIP_W, COLS_H, DATE_W, ICON_W, KEYBAR_H, PAD, PATH_H, ROW_H, SIZE_W, STATUS_H};
+use crate::app::format::{format_bytes, format_date, format_size};
+use crate::app::layout::{CHIP_W, COLS_H, Columns, DATE_W, ICON_W, KEYBAR_H, PAD, PATH_H, ROW_H, STATUS_H};
 use crate::app::mouse::Drag;
 use crate::app::{App, LOADING_DELAY_MS, Mode};
 use crate::files::listing::{Entry, Kind};
+use crate::files::sort::SortKey;
 use crate::panel::Panel;
 use crate::sys::gfx::{Canvas, rect};
 use crate::theme::{Color, Theme};
@@ -34,30 +35,21 @@ struct Area<'a> {
     width: f32,
 }
 
-/// Left edges of the columns.
-struct Columns {
-    name_x: f32,
-    size_x: f32,
-    date_x: f32,
-}
-
-impl Columns {
-    fn of(a: &Area) -> Columns {
-        let date_x = a.x + a.width - PAD - DATE_W;
-        Columns { name_x: a.x + PAD + ICON_W + 6.0, size_x: date_x - 14.0 - SIZE_W, date_x }
-    }
-}
-
 impl App {
     pub(crate) fn draw_panel(&self, c: &Canvas, i: usize, w: f32, h: f32, caret_x: Option<f32>) {
         let (x, width) = self.panel_x(i, w);
         let a = Area { index: i, panel: &self.panels[i], active: i == self.active, x, width };
-        let cols = Columns::of(&a);
+        let cols = self.columns(i, w);
         self.draw_path_bar(c, &a, caret_x);
         self.draw_column_headers(c, &a, &cols);
         self.draw_rows(c, &a, &cols, h);
         self.draw_scrollbar(c, &a, w, h);
         self.draw_status_bar(c, &a, h);
+    }
+
+    /// Rounded (`1,2 GB`) or, with the option, exact (`1.288.490.188`).
+    fn size_text(&self, bytes: u64) -> String {
+        if self.options.exact_sizes { format_bytes(bytes) } else { format_size(bytes) }
     }
 
     /// Drive chip and path (or the path editor), plus "loading" on slow directories.
@@ -100,13 +92,33 @@ impl App {
         }
     }
 
+    /// Column headers; the sort column gets ▲/▼, the one under the mouse a highlight.
     fn draw_column_headers(&self, c: &Canvas, a: &Area, cols: &Columns) {
         let t = self.theme;
         let f = c.fonts;
         let y = PATH_H;
-        c.text_str("Name", &f.small, rect(cols.name_x, y, cols.size_x - cols.name_x, COLS_H), t.text_dim);
-        c.text_str("Größe", &f.small_right, rect(cols.size_x, y, SIZE_W, COLS_H), t.text_dim);
-        c.text_str("Geändert", &f.small, rect(cols.date_x, y, DATE_W, COLS_H), t.text_dim);
+        let sort = a.panel.sort;
+        let headers = [
+            (SortKey::Name, "Name", cols.name_x, cols.size_x - cols.name_x - 8.0, false),
+            (SortKey::Size, "Größe", cols.size_x, cols.size_w, true),
+            (SortKey::Date, "Geändert", cols.date_x, DATE_W, false),
+        ];
+        for (key, label, x, w, right) in headers {
+            if self.hover_header == Some((a.index, key)) {
+                c.fill_round(rect(x - 6.0, y + 2.0, w + 12.0, COLS_H - 4.0), 4.0, t.cursor_inactive);
+            }
+            if key != sort.key {
+                let font = if right { &f.small_right } else { &f.small };
+                c.text_str(label, font, rect(x, y, w, COLS_H), t.text_dim);
+                continue;
+            }
+            // Arrow after the label; for the right-aligned size column the label moves left.
+            let arrow = if sort.desc { "▼" } else { "▲" };
+            let lw = self.gfx.measure(&crate::app::format::utf16(label), &f.small) + 2.0;
+            let label_x = if right { x + w - lw - 14.0 } else { x };
+            c.text_str(label, &f.small, rect(label_x, y, lw, COLS_H), t.text);
+            c.text_str(arrow, &f.small, rect(label_x + lw + 2.0, y, 14.0, COLS_H), t.accent);
+        }
         c.fill(rect(a.x, y + COLS_H - 1.0, a.width, 1.0), t.divider);
     }
 
@@ -147,18 +159,20 @@ impl App {
         c.text(&[glyph], &f.icon, rect(x + PAD, y, ICON_W, ROW_H), icol);
         c.text(&e.name, &f.name, rect(cols.name_x, y, cols.size_x - cols.name_x - 8.0, ROW_H), tcol);
         let dim = if e.marked { t.marked } else { t.text_dim };
-        let size_rect = rect(cols.size_x, y, SIZE_W, ROW_H);
+        let size_rect = rect(cols.size_x, y, cols.size_w, ROW_H);
         match e.kind {
             Kind::Parent => {}
             Kind::Dir => match a.panel.size_of(e) {
                 Some(s) => {
-                    let text = format_size(s.bytes());
+                    let text = self.size_text(s.bytes());
                     let text = if s.incomplete() { format!("≥ {text}") } else { text };
                     c.text_str(&text, &f.right, size_rect, if s.done() { dim } else { t.accent });
                 }
                 None => c.text_str("Ordner", &f.small_right, size_rect, dim),
             },
-            _ => c.text_str(&format_size(e.size), &f.right, size_rect, if e.hidden && !e.marked { tcol } else { dim }),
+            _ => {
+                c.text_str(&self.size_text(e.size), &f.right, size_rect, if e.hidden && !e.marked { tcol } else { dim })
+            }
         }
         if e.kind != Kind::Parent {
             c.text_str(&format_date(e.mtime), &f.small, rect(cols.date_x, y, DATE_W, ROW_H), dim);
@@ -212,11 +226,11 @@ impl App {
         match &p.error {
             Some(err) => c.text_str(err, &f.small, sr, t.error),
             None if marked > 0 => {
-                let s = format!("{marked} markiert  ·  {}", format_size(marked_bytes));
+                let s = format!("{marked} markiert  ·  {}", self.size_text(marked_bytes));
                 c.text_str(&s, &f.small, sr, t.marked);
             }
             None => {
-                let s = format!("{} Ordner  ·  {} Dateien  ·  {}", p.dirs, p.files, format_size(p.bytes));
+                let s = format!("{} Ordner  ·  {} Dateien  ·  {}", p.dirs, p.files, self.size_text(p.bytes));
                 c.text_str(&s, &f.small, sr, t.text_dim);
             }
         }

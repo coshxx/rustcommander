@@ -43,7 +43,11 @@ the steady-state frame time).
 - Standard Windows title bar, dark-tinted via DWM.
 - Font: Segoe UI Variable; icons are glyphs from Segoe Fluent Icons, colored by file type.
 - Columns: Name (incl. extension) | Size | Date. (Later configurable: extension as its own column.)
-- Sorting: `..` first, directories before files, natural & case-insensitive.
+- Sorting per panel by name, size or date (click on a column header or Ctrl+F3 / Ctrl+F6 /
+  Ctrl+F5; again = other direction). A new column starts A→Z, largest or newest first. `..`
+  first, directories before files; ties and names natural & case-insensitive. Without the option
+  "Ordner in die Sortierung einschließen" folders are always sorted by name (descending only when
+  sorting by name descending). The sort column shows ▲/▼; saved per panel in `config.json`.
 - Hidden/system files: dimmed.
 - UI language: German for now.
 
@@ -62,7 +66,7 @@ the steady-state frame time).
 | Alt+F1 / Alt+F2 | Choose drive for left / right pane |
 | Ctrl+L, click on path | Edit path (Ctrl+V, environment variables) |
 | Ctrl+R, F2 | Reload |
-| Type letters | Quick search (jumps to first match), Esc cancels |
+| Type letters | Quick search (jumps to first match), Esc cancels; with the option "Alt+letter" only Alt+letter starts it |
 | Insert, Space | Toggle mark and move down (Space only when no quick search is active) |
 | Space on a folder | Also counts the folder's size, shown in the size column (see below) |
 | Alt+Shift+Enter | Count the size of every folder in the pane |
@@ -78,6 +82,8 @@ the steady-state frame time).
 | Shift+F8, Shift+Del | Delete permanently (with confirmation) |
 | Esc (while a job runs) | Cancel the job |
 | Esc (otherwise) | Cancel running folder size counts |
+| Ctrl+F3 / Ctrl+F6 / Ctrl+F5 | Sort by name / size / date; again = other direction |
+| Ctrl+, | Options (see below) |
 
 ### Mouse
 
@@ -92,7 +98,7 @@ the steady-state frame time).
 Auto-refresh keeps the scroll position as well; only navigation scrolls to the cursor.
 
 On startup the last directories and the window position are restored
-(`%APPDATA%\RustCommander\config.ini`).
+(`%APPDATA%\RustCommander\config.json`, see Settings below).
 
 ### Folder sizes (Space, Alt+Shift+Enter)
 
@@ -106,9 +112,45 @@ On startup the last directories and the window position are restored
   when done. `≥ 1,2 GB` means something could not be read (access denied).
 - Counted sizes go into the "N markiert · size" sum of the status bar.
 - They stay across automatic refreshes and are dropped when leaving the directory or reloading
-  with F2 / Ctrl+R. No re-sorting.
+  with F2 / Ctrl+R.
+- With the option "Ordner in die Sortierung einschließen" and sorting by size, counted folders are
+  sorted by their size; uncounted ones (and those still counting) come last in the folder block,
+  by name. Nothing is ever counted automatically. When a count finishes the list is sorted again;
+  the cursor stays on its entry.
 - Inside archives the size comes from the table of contents.
 - Measured (warm cache, 16 threads): `C:\Windows` (45 GB) in 1.6 s; single-threaded 7.7 s.
+
+### Settings (Ctrl+,)
+
+- Options dialog: one checkbox per option; ↑/↓ select, Space/Enter/click toggle, Esc or a click
+  outside closes. A change takes effect and is saved immediately (no OK/Cancel).
+- **Genaue Größen in Bytes anzeigen** (`exact_sizes`, default off): size column (files and counted
+  folders, also while counting) and status bar show exact byte counts with German thousands
+  separators (`48.318.382.080`, no unit; `≥` keeps its meaning). The size column is then 140
+  instead of 84 DIPs wide. Progress card and lister stay rounded.
+- **Ordner in die Sortierung einschließen** (`sort_dirs`, default off): folders (still above the
+  files) are sorted by the chosen column too; see Sorting and Folder sizes.
+- **Schnellsuche nur mit Alt+Buchstabe** (`alt_search`, default off): Alt+character starts the
+  quick search; while it runs, plain characters continue it. Without a running search plain
+  characters do nothing (`\` and Space keep working).
+- Everything is saved in `%APPDATA%\RustCommander\config.json` (`RC_CONFIG_DIR` overrides the
+  directory), written by a small JSON reader/writer of our own (no serde):
+
+  ```json
+  {
+    "panels": {
+      "left": "C:\\…", "right": "D:\\…", "active": 1,
+      "left_sort": { "by": "size", "desc": true }, "right_sort": { "by": "name", "desc": false }
+    },
+    "window": { "left": 100, "top": 100, "right": 1500, "bottom": 900, "maximized": false },
+    "mask": "*.rs",
+    "lister": { "window": { … }, "wrap": true },
+    "options": { "exact_sizes": false, "alt_search": false, "sort_dirs": false }
+  }
+  ```
+
+  Unknown keys are ignored, missing ones get their default, a broken file gives all defaults.
+  An old `config.ini` is not read.
 
 ### File masks (Num+ / Num−)
 
@@ -116,7 +158,7 @@ On startup the last directories and the window position are restored
 `|` starts the excludes (`*.* | *.bak`). Masks apply to files only, unless they end in `\`
 (`*\` = all directories). A mask without wildcards means "contains". `*.*` also matches names
 without a dot. Num+ adds to the existing marks, Num− only removes matches. The main keyboard's
-`+`/`-` stay quick search characters. The last mask is saved in `config.ini`.
+`+`/`-` stay quick search characters. The last mask is saved in `config.json`.
 
 ## File operations
 
@@ -182,12 +224,12 @@ Closing the main window closes them.
   (the term is encoded in the shown encoding; binary/hex search ANSI/DOS text); the status bar
   shows the progress, Esc cancels. The match is highlighted and scrolled into view.
 - **Status bar:** mode, encoding, wrap, file size, position in %, hex offset; key hints.
-- Window position and wrapping are saved in `config.ini` (`lister_window`, `lister_wrap`).
+- Window position and wrapping are saved in `config.json` (`lister.window`, `lister.wrap`).
 
 ## Deliberately later
 
 Lister: selecting and copying text, images, following growing files, N/P for the next/previous
 file, line numbers, hex search (`4D 5A`). Archives: packing (Alt+F5) and writing into archives, password dialog, archives inside archives,
 7-Zip's `7z.dll` as a fallback for Windows 10. Parallel copying of many small files, shell context
-menu (long right press / Shift+F10, since a right click marks), system icons (async, cached), live filter, light theme, settings, normalizing path casing
+menu (long right press / Shift+F10, since a right click marks), system icons (async, cached), live filter, light theme, normalizing path casing
 (typed `c:\windows` → `C:\Windows`), partial redraws (if frame time on large windows becomes an issue).

@@ -8,6 +8,7 @@ pub(crate) mod jobs;
 mod keyboard;
 pub(crate) mod layout;
 pub(crate) mod mouse;
+pub(crate) mod options;
 mod sizes;
 pub(crate) mod text_input;
 
@@ -21,9 +22,10 @@ use crate::app::dialogs::{Dialog, DrivePopup};
 use crate::app::jobs::{AfterJob, RunningJob};
 use crate::app::mouse::Drag;
 use crate::app::text_input::TextInput;
-use crate::config::Config;
+use crate::config::{Config, Options};
 use crate::files::archive::is_archive_name;
 use crate::files::listing::{Kind, Loaded};
+use crate::files::sort::SortKey;
 use crate::files::watch::Watcher;
 use crate::panel::{Applied, LoadSink, Panel};
 use crate::sys::gfx::Gfx;
@@ -65,6 +67,8 @@ pub(crate) enum Mode {
     Dialog(Dialog),
     /// A running job waits for an answer about this existing target.
     Conflict(PathBuf),
+    /// The options dialog (Ctrl+,); `sel` = highlighted option.
+    Options { sel: usize },
 }
 
 /// Color and icon of a notice.
@@ -109,8 +113,12 @@ pub struct App {
     pub(crate) drag_timer_armed: bool,
     /// Panel whose scrollbar is under the mouse.
     pub(crate) hover_bar: Option<usize>,
+    /// Column header under the mouse (panel, column).
+    pub(crate) hover_header: Option<(usize, SortKey)>,
     /// Last mask used for Num+ / Num−.
     pub(crate) mask: String,
+    /// Switched in the options dialog; saved right away.
+    pub(crate) options: Options,
     /// The key that just opened a dialog also produces a WM_CHAR (e.g. Num+ → '+'): drop it.
     pub(crate) swallow_next_char: bool,
     /// Files to open in a lister (F3); opened by `window.rs` on `WM_APP_VIEW`.
@@ -131,6 +139,7 @@ impl App {
         let defaults = [Some(PathBuf::from(r"C:\")), home];
         for (i, panel) in panels.iter_mut().enumerate() {
             let p = cfg.paths[i].clone().or(defaults[i].clone()).unwrap_or(PathBuf::from(r"C:\"));
+            panel.sort = cfg.sorts[i];
             panel.navigate(i, p, None, &sink);
         }
         let mut timing = timing;
@@ -153,7 +162,9 @@ impl App {
             drag: None,
             drag_timer_armed: false,
             hover_bar: None,
+            hover_header: None,
             mask: cfg.mask.clone().unwrap_or_else(|| "*.*".into()),
+            options: cfg.options,
             swallow_next_char: false,
             view_requests: Vec::new(),
             painted: false,
@@ -163,12 +174,14 @@ impl App {
         app
     }
 
-    /// Current state to save on exit.
+    /// Current state to save (on exit and when an option changes).
     pub fn config(&self, hwnd: HWND) -> Config {
         let mut cfg = Config {
             active: self.active,
             mask: Some(self.mask.clone()),
             lister: crate::lister::settings(),
+            options: self.options,
+            sorts: [self.panels[0].sort, self.panels[1].sort],
             ..Default::default()
         };
         for i in 0..2 {
@@ -218,7 +231,7 @@ impl App {
                 Err(e) => format!("  error: {}", e.trim()),
             };
             let p = l.panel;
-            match self.panels[p].apply(l.id, l.result) {
+            match self.panels[p].apply(l.id, l.result, self.options.sort_dirs) {
                 Applied::Stale => continue,
                 Applied::Ok { dir_changed } => {
                     if dir_changed || self.panels[p].watcher.is_none() {

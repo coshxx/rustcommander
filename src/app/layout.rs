@@ -1,6 +1,7 @@
 //! Where things are on screen: sizes in DIPs, panel geometry and hit-testing.
 
 use crate::app::{App, Mode};
+use crate::files::sort::SortKey;
 use crate::sys::gfx::{Rect, rect};
 
 // Layout in DIPs.
@@ -9,12 +10,18 @@ pub(crate) const COLS_H: f32 = 24.0;
 pub(crate) const ROW_H: f32 = 24.0;
 pub(crate) const STATUS_H: f32 = 26.0;
 pub(crate) const KEYBAR_H: f32 = 30.0;
-pub(crate) const SIZE_W: f32 = 84.0;
+const SIZE_W: f32 = 84.0;
+/// Size column with exact byte counts (option); fits `≥ 99.999.999.999.999`.
+const SIZE_W_EXACT: f32 = 140.0;
 pub(crate) const DATE_W: f32 = 118.0;
 pub(crate) const PAD: f32 = 12.0;
 pub(crate) const ICON_W: f32 = 24.0;
 pub(crate) const CHIP_W: f32 = 40.0;
 const POPUP_W: f32 = 230.0;
+/// Options dialog: width, height of one option row, rows start this far below the top.
+const OPTIONS_W: f32 = 460.0;
+pub(crate) const OPTION_H: f32 = 32.0;
+pub(crate) const OPTIONS_ROWS_Y: f32 = 56.0;
 pub(crate) const CARD_W: f32 = 400.0;
 /// Width of the scrollbar's mouse zone at the panel's right edge.
 const SCROLL_ZONE_W: f32 = 14.0;
@@ -26,6 +33,8 @@ pub(crate) enum Hit {
     Drive(usize),
     /// Path bar of a panel.
     Path(usize),
+    /// Column header of a panel (click sorts).
+    Header(usize, SortKey),
     /// (panel, entry index)
     Row(usize, usize),
     Scrollbar(usize),
@@ -34,6 +43,14 @@ pub(crate) enum Hit {
     /// Entry of the drive popup.
     Popup(usize),
     Nothing,
+}
+
+/// Left edges of a panel's columns and the width of the size column (DIPs).
+pub(crate) struct Columns {
+    pub(crate) name_x: f32,
+    pub(crate) size_x: f32,
+    pub(crate) size_w: f32,
+    pub(crate) date_x: f32,
 }
 
 /// Scrollbar geometry of one panel (DIPs).
@@ -86,6 +103,18 @@ impl App {
         if y < PATH_H {
             return if x < px + PAD + CHIP_W { Hit::Drive(p) } else { Hit::Path(p) };
         }
+        if y < PATH_H + COLS_H {
+            // Each header reaches halfway into the gap before the next column.
+            let c = self.columns(p, w);
+            let key = if x >= c.date_x - 7.0 {
+                SortKey::Date
+            } else if x >= c.size_x - 4.0 {
+                SortKey::Size
+            } else {
+                SortKey::Name
+            };
+            return Hit::Header(p, key);
+        }
         let (top, lh) = Self::list_area(h);
         if y >= top && y < top + lh {
             if self.scrollbar(p, w, h).is_some_and(|sb| x >= sb.zone.left) {
@@ -110,6 +139,34 @@ impl App {
         let thumb_h = (lh * p.rows_visible as f32 / p.entries.len() as f32).max(THUMB_MIN_H).min(lh);
         let thumb_y = top + (lh - thumb_h) * p.top as f32 / p.max_top() as f32;
         Some(ScrollBar { zone: rect(x + pw - SCROLL_ZONE_W, top, SCROLL_ZONE_W, lh), thumb_y, thumb_h })
+    }
+
+    /// Columns of panel `i` in a window `w` DIPs wide; the size column is wider with exact
+    /// byte counts.
+    pub(crate) fn columns(&self, i: usize, w: f32) -> Columns {
+        let (x, width) = self.panel_x(i, w);
+        let size_w = if self.options.exact_sizes { SIZE_W_EXACT } else { SIZE_W };
+        let date_x = x + width - PAD - DATE_W;
+        Columns { name_x: x + PAD + ICON_W + 6.0, size_x: date_x - 14.0 - size_w, size_w, date_x }
+    }
+
+    /// The options dialog card in a `w` × `h` window: title, one row per option, key chips.
+    pub(crate) fn options_rect(w: f32, h: f32) -> Rect {
+        let dw = (w - 48.0).clamp(200.0, OPTIONS_W);
+        let dh = OPTIONS_ROWS_Y + OPTION_H * crate::app::options::LABELS.len() as f32 + 52.0;
+        rect(((w - dw) / 2.0).floor(), ((h - dh) / 2.5).floor(), dw, dh)
+    }
+
+    /// Option row at (`x`, `y`): `Some(Some(i))` = row `i`, `Some(None)` = elsewhere on the
+    /// card, `None` = outside the card.
+    pub(crate) fn option_at(&self, x: f32, y: f32) -> Option<Option<usize>> {
+        let (w, h) = self.gfx.size_dips(self.hwnd);
+        let r = Self::options_rect(w, h);
+        if x < r.left || x >= r.right || y < r.top || y >= r.bottom {
+            return None;
+        }
+        let row = (y - r.top - OPTIONS_ROWS_Y) / OPTION_H;
+        Some((row >= 0.0 && (row as usize) < crate::app::options::LABELS.len()).then_some(row as usize))
     }
 
     /// Drive popup below the drive chip of a panel at `px`.
