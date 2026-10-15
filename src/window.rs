@@ -16,12 +16,38 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     ReleaseCapture, SetCapture, SetFocus, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VIRTUAL_KEY,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::core::w;
+use windows::core::{HSTRING, PCWSTR, w};
 
 use crate::app::App;
 use crate::{app, lister, panel, theme};
 
-const TITLE: windows::core::PCWSTR = w!("RustCommander");
+/// Resource ID of the icon in `res/app.rc`.
+const ICON_ID: u16 = 1;
+
+/// "RustCommander 0.1.0", plus "(Debug)" in debug builds.
+fn title() -> HSTRING {
+    let debug = if cfg!(debug_assertions) { " (Debug)" } else { "" };
+    HSTRING::from(format!("RustCommander {}{debug}", env!("CARGO_PKG_VERSION")))
+}
+
+/// The app icon in the system's size for `metric` (`SM_CXICON` / `SM_CXSMICON`); `None` in a
+/// build without the resource.
+pub(crate) fn app_icon(metric: SYSTEM_METRICS_INDEX) -> Option<HICON> {
+    unsafe {
+        let instance = GetModuleHandleW(None).ok()?;
+        let s = GetSystemMetrics(metric);
+        let icon = LoadImageW(
+            Some(instance.into()),
+            PCWSTR(ICON_ID as usize as *const u16),
+            IMAGE_ICON,
+            s,
+            s,
+            LR_DEFAULTCOLOR,
+        )
+        .ok()?;
+        Some(HICON(icon.0))
+    }
+}
 
 /// The app behind a lock. Win32 delivers some messages synchronously while we are still
 /// inside a handler (dialogs, `SetWindowPos`, `DestroyWindow`, modal loops). Without the
@@ -68,6 +94,8 @@ pub(crate) fn create_window() -> HWND {
             lpfnWndProc: Some(wndproc),
             hInstance: instance.into(),
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
+            hIcon: app_icon(SM_CXICON).unwrap_or_default(),
+            hIconSm: app_icon(SM_CXSMICON).unwrap_or_default(),
             // Dark GDI background: no white flash before the first frame.
             hbrBackground: CreateSolidBrush(COLORREF(theme::colorref(theme::DARK.bg))),
             lpszClassName: w!("RustCommanderWnd"),
@@ -80,7 +108,7 @@ pub(crate) fn create_window() -> HWND {
         let hwnd = CreateWindowExW(
             WINDOW_EX_STYLE::default(),
             w!("RustCommanderWnd"),
-            TITLE,
+            &title(),
             WS_OVERLAPPEDWINDOW,
             CW_USEDEFAULT,
             CW_USEDEFAULT,

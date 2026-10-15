@@ -18,6 +18,8 @@ the steady-state frame time).
 
 - Windows only. Win32 window + Direct2D/DirectWrite, everything custom-drawn.
 - Single dependency: the `windows` crate. Release profile: LTO, `panic=abort`, `codegen-units=1`.
+- `build.rs` embeds the icon (`res/app.rc`, `res/app.ico`) with `rc.exe` from the Windows SDK (no
+  crate; `RC` overrides the path). Without the SDK the exe is built without icon.
 - Directory listing: `FindFirstFileExW` with `FindExInfoBasic` + `FIND_FIRST_EX_LARGE_FETCH`,
   always on a background thread, cancellable. Loading indicator only after 150 ms.
 - Only visible rows are drawn.
@@ -40,7 +42,10 @@ the steady-state frame time).
 ## Look
 
 - Custom dark theme; all colors centralized in `theme.rs` (light theme comes later).
-- Standard Windows title bar, dark-tinted via DWM.
+- Standard Windows title bar, dark-tinted via DWM. Title `RustCommander <version from
+  Cargo.toml>`, debug builds add `(Debug)`.
+- Icon: white bold "RC" on a rounded square in the accent blue, 16–256 px; drawn by
+  `res/make-icon.ps1` (GDI+), used by the exe, the main window and the lister windows.
 - Font: Segoe UI Variable; icons are glyphs from Segoe Fluent Icons, colored by file type.
 - Columns: Name (incl. extension) | Size | Date. (Later configurable: extension as its own column.)
 - Sorting per panel by name, size or date (click on a column header or Ctrl+F3 / Ctrl+F6 /
