@@ -33,7 +33,8 @@ thread touches.
 | `app/options.rs` | Options dialog (Ctrl+,): the list of switches; toggling saves the config. |
 | `app/jobs.rs` | Starting file operations and handling their progress, conflicts and results. |
 | `app/layout.rs` | Sizes (DIPs), panel geometry, hit-testing, scrollbar geometry. |
-| `app/text_input.rs` | Single-line text field. |
+| `app/text_input.rs` | Single-line text field with a selection. |
+| `app/rename.rs` | Inline renaming (slow second click on a name). |
 | `app/format.rs` | Pure helpers: size/date formatting, name checks, path parsing. |
 | `ui/` | Drawing only – reads `App`, never changes it. `paint()` redraws the whole window. |
 | `panel.rs` | One file list: directory, entries, cursor, scroll position, marks, quick search. |

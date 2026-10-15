@@ -31,10 +31,11 @@ pub(crate) fn draw_input(c: &Canvas, gfx: &Gfx, t: &Theme, r: Rect, input: &Text
     let inner = rect(r.left + 6.0, r.top, r.right - r.left - 12.0, r.bottom - r.top);
     let shift = (caret_x - (inner.right - inner.left) + 4.0).max(0.0);
     c.clip(inner);
-    if input.all && focused {
-        let tw = gfx.measure(&input.text, &c.fonts.name);
-        let sel = rect(inner.left - shift - 1.0, inner.top + 5.0, tw + 2.0, inner.bottom - inner.top - 10.0);
-        c.fill_round(sel, 2.0, t.cursor_active);
+    if let Some(sel) = input.selection().filter(|_| focused) {
+        let x0 = gfx.caret_x(&input.text[..sel.start]);
+        let x1 = gfx.caret_x(&input.text[..sel.end]);
+        let r = rect(inner.left - shift + x0 - 1.0, inner.top + 4.0, x1 - x0 + 2.0, inner.bottom - inner.top - 8.0);
+        c.fill_round(r, 2.0, t.cursor_active);
     }
     c.text(&input.text, &c.fonts.name, rect(inner.left - shift, inner.top, 10000.0, inner.bottom - inner.top), t.text);
     if focused {

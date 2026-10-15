@@ -156,7 +156,7 @@ impl App {
                     _ => name.len(),
                 };
                 let msg = tf("dialog.rename_to", &[("name", &String::from_utf16_lossy(&name))]);
-                (vec![p.dir.join(e.os_name())], msg, Some(TextInput { text: name, caret, all: false }))
+                (vec![p.dir.join(e.os_name())], msg, Some(TextInput { text: name, caret, anchor: None }))
             }
             DialogKind::MkDir => {
                 let msg = tf("dialog.mkdir_in", &[("dir", &p.dir.display())]);

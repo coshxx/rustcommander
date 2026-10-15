@@ -46,6 +46,7 @@ impl App {
             Mode::PathEdit { input, .. } => Some(input),
             Mode::Dialog(d) => d.input.as_ref(),
             Mode::Find => self.find.as_ref().and_then(|f| f.inputs.get(f.focus)),
+            Mode::Rename(r) => Some(&r.input),
             _ => None,
         };
         let caret_x = input.map(|i| self.gfx.caret_x(&i.text[..i.caret]));

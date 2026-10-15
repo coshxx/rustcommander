@@ -83,7 +83,7 @@ the steady-state frame time).
 | Ctrl+Num+ / Ctrl+Num− | Mark all / unmark all, no dialog |
 | Num* | Invert marks of files |
 | F5 / F6 | Copy / move marked entries (or the one under the cursor) to the other pane |
-| Shift+F6 | Rename |
+| Shift+F6 | Rename (dialog; inline renaming: slow second click, see Mouse) |
 | F7 | New directory (`a\b` creates nested directories) |
 | F8, Del | Move to recycle bin (with confirmation) |
 | Shift+F8, Shift+Del | Delete permanently (with confirmation) |
@@ -99,6 +99,7 @@ the steady-state frame time).
 | Action | Effect |
 |---|---|
 | Click / double-click | Set cursor / open |
+| Slow second click in the name column of the entry under the cursor | Rename in place (see below) |
 | Right click | Set cursor and toggle mark |
 | Right drag | Every row passed gets the state of the first one; scrolls automatically past the list's edges |
 | Right press held 0.5 s on a row | Shell context menu (the row's mark is undone) |
@@ -106,6 +107,17 @@ the steady-state frame time).
 | Scrollbar | Drag the thumb; click the track to page towards the mouse (auto-repeat after the system keyboard delay, stops at the mouse). Wider and brighter on hover. |
 
 Auto-refresh keeps the scroll position as well; only navigation scrolls to the cursor.
+
+Inline renaming, like Explorer: a click anywhere in the name column of the entry that already has the cursor
+in the active pane turns the name into an input 300 ms later. Two clicks less than 300 ms apart
+are a double click (open), even though Windows' own double-click time is longer (usually 500 ms,
+which felt sluggish); a key press or mouse move cancels; never on `..` or
+inside archives). Files start with the name before the extension selected, folders entirely;
+Shift+←/→/Home/End extend the selection, Ctrl+A selects all (in every text input). Enter, Tab,
+a click elsewhere, the wheel or another window taking the focus rename; Esc cancels. An unchanged
+or empty name changes nothing, a case-only change renames. On an error (invalid name, target
+exists, access denied) the notice shows it and the input stays open. Afterwards the cursor is on
+the renamed entry.
 
 On startup the last directories and the window position are restored
 (`%APPDATA%\RustCommander\config.json`, see Settings below).
