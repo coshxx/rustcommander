@@ -45,6 +45,20 @@ pub(crate) enum Hit {
     Nothing,
 }
 
+/// Parts of the search dialog (DIPs).
+pub(crate) struct FindLayout {
+    pub(crate) card: Rect,
+    /// Name, folder, text.
+    pub(crate) inputs: [Rect; 3],
+    pub(crate) status: Rect,
+    pub(crate) list: Rect,
+    /// Top of the key chip row.
+    pub(crate) chips_y: f32,
+}
+
+/// Width of the labels left of the search dialog's inputs.
+pub(crate) const FIND_LABEL_W: f32 = 110.0;
+
 /// Left edges of a panel's columns and the width of the size column (DIPs).
 pub(crate) struct Columns {
     pub(crate) name_x: f32,
@@ -139,6 +153,21 @@ impl App {
         let thumb_h = (lh * p.rows_visible as f32 / p.entries.len() as f32).max(THUMB_MIN_H).min(lh);
         let thumb_y = top + (lh - thumb_h) * p.top as f32 / p.max_top() as f32;
         Some(ScrollBar { zone: rect(x + pw - SCROLL_ZONE_W, top, SCROLL_ZONE_W, lh), thumb_y, thumb_h })
+    }
+
+    /// The search dialog in a `w` × `h` window: nearly the whole window.
+    pub(crate) fn find_layout(w: f32, h: f32) -> FindLayout {
+        let cw = (w - 48.0).clamp(300.0, 1100.0);
+        let ch = (h - 48.0).max(320.0);
+        let card = rect(((w - cw) / 2.0).floor(), ((h - ch) / 2.0).floor(), cw, ch);
+        let x = card.left + 20.0 + FIND_LABEL_W;
+        let iw = cw - 40.0 - FIND_LABEL_W;
+        let inputs = [0.0, 1.0, 2.0].map(|i| rect(x, card.top + 52.0 + i * 40.0, iw, 32.0));
+        let status = rect(card.left + 20.0, inputs[2].bottom + 8.0, cw - 40.0, 24.0);
+        let chips_y = card.bottom - 40.0;
+        let list =
+            rect(card.left + 12.0, status.bottom + 4.0, cw - 24.0, (chips_y - 4.0 - status.bottom - 4.0).max(ROW_H));
+        FindLayout { card, inputs, status, list, chips_y }
     }
 
     /// Columns of panel `i` in a window `w` DIPs wide; the size column is wider with exact

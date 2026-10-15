@@ -89,6 +89,7 @@ the steady-state frame time).
 | Esc (otherwise) | Cancel running folder size counts |
 | Ctrl+F3 / Ctrl+F6 / Ctrl+F5 | Sort by name / size / date; again = other direction |
 | Shift+F10, menu key | Shell context menu (Shift held: extended entries) |
+| Alt+F7 | File search (see below) |
 | Ctrl+, | Options (see below) |
 
 ### Mouse
@@ -158,6 +159,27 @@ On startup the last directories and the window position are restored
 
   Unknown keys are ignored, missing ones get their default, a broken file gives all defaults.
   An old `config.ini` is not read.
+
+### File search (Alt+F7)
+
+- Dialog with three fields: **Name** (file mask syntax as for Num+; masks without `\` find files
+  and folders, `name\` only folders; an excluded folder like `| target\` is not searched),
+  **Suchen in** (preset with the active panel's folder; inside an archive: the folder holding it)
+  and **Enthält Text** (optional; case-insensitive incl. umlauts, in UTF-8, ANSI and UTF-16 LE;
+  folders never match).
+- Runs in the background on one thread per core (2–16) sharing one stack of folders, reading
+  directories like the folder sizes (`FindFirstFileExW`) and file contents memory-mapped with the
+  lister's byte search. Hidden and system files are included; directory links are not followed;
+  archives are not looked into.
+- Hits appear live; the status line shows hits and searched folders. When done, the hits are
+  sorted by path. Esc cancels a running search (the hits stay), then closes the dialog.
+- Keys: Tab / ↑↓ between fields and the list, Enter in a field starts the search, Enter in the
+  list goes to the hit (its folder in the active panel, cursor on it), F3 views it. Click selects,
+  double click goes there, the wheel scrolls.
+- The last search is kept: Alt+F7 shows it again with the list focused, so the next hit is
+  Alt+F7, ↓, Enter.
+- Later: results as a panel ("feed to listbox"), size/date filters, regular expressions, searching
+  inside archives.
 
 ### Shell context menu (long right press, Shift+F10, menu key)
 

@@ -41,7 +41,7 @@ impl App {
         c.text_str(&d.message, &c.fonts.name, rect(x, y, iw, 26.0), t.text_dim);
         y += 30.0;
         if let (Some(input), Some(cx)) = (&d.input, caret_x) {
-            draw_input(c, &self.gfx, t, rect(x, y, iw, 32.0), input, cx);
+            draw_input(c, &self.gfx, t, rect(x, y, iw, 32.0), input, Some(cx));
             y += input_h;
         }
         let ok = if matches!(d.kind, DialogKind::Delete { .. }) { "Löschen" } else { "OK" };

@@ -142,11 +142,40 @@ fn worker(pool: &'static Pool) {
 
 /// Add up the files of one directory; returns its subdirectories.
 fn read_dir(size: &DirSize, dir: &[u16]) -> Vec<Vec<u16>> {
+    let mut subdirs = Vec::new();
+    let mut bytes = 0u64;
+    let mut n = 0u32;
+    let complete = scan(dir, |name, data| {
+        if is_dir(data) {
+            if !is_dir_link(data) {
+                subdirs.push(child(dir, name));
+            }
+        } else {
+            bytes += file_size(data);
+        }
+        n += 1;
+        // Huge directories: show progress and react to cancelling now and then.
+        if n.is_multiple_of(4096) {
+            size.bytes.fetch_add(std::mem::take(&mut bytes), Ordering::Relaxed);
+            return !size.cancelled();
+        }
+        true
+    });
+    if !complete {
+        size.incomplete.store(true, Ordering::Relaxed);
+    }
+    size.bytes.fetch_add(bytes, Ordering::Relaxed);
+    subdirs
+}
+
+/// Read the directory `dir` (a `\\?\` path without terminator) entry by entry, without `.` and
+/// `..`, the fastest way Windows offers. `f` gets name and find data and returns `false` to stop.
+/// Returns `false` if the directory could not be read (completely); an empty one is fine.
+pub(crate) fn scan(dir: &[u16], mut f: impl FnMut(&[u16], &WIN32_FIND_DATAW) -> bool) -> bool {
     let mut pattern = dir.to_vec();
     if pattern.last() != Some(&(b'\\' as u16)) {
         pattern.push(b'\\' as u16);
     }
-    let prefix = pattern.len();
     pattern.extend_from_slice(&[b'*' as u16, 0]);
     let mut data = WIN32_FIND_DATAW::default();
     let handle = unsafe {
@@ -161,53 +190,50 @@ fn read_dir(size: &DirSize, dir: &[u16]) -> Vec<Vec<u16>> {
     };
     let handle = match handle {
         Ok(h) => h,
-        Err(e) => {
-            if e.code() != ERROR_FILE_NOT_FOUND.to_hresult() {
-                size.incomplete.store(true, Ordering::Relaxed);
-            }
-            return Vec::new();
-        }
+        Err(e) => return e.code() == ERROR_FILE_NOT_FOUND.to_hresult(),
     };
-    let mut subdirs = Vec::new();
-    let mut bytes = 0u64;
-    let mut n = 0u32;
+    let mut complete = true;
     loop {
         let len = data.cFileName.iter().position(|&c| c == 0).unwrap_or(data.cFileName.len());
         let name = &data.cFileName[..len];
-        let a = data.dwFileAttributes;
-        if a & FILE_ATTRIBUTE_DIRECTORY.0 != 0 {
-            let dots = name == [b'.' as u16] || name == [b'.' as u16, b'.' as u16];
-            let link = a & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0
-                && matches!(data.dwReserved0, IO_REPARSE_TAG_MOUNT_POINT | IO_REPARSE_TAG_SYMLINK);
-            if !dots && !link {
-                let mut path = Vec::with_capacity(prefix + len);
-                path.extend_from_slice(&pattern[..prefix]);
-                path.extend_from_slice(name);
-                subdirs.push(path);
-            }
-        } else {
-            bytes += ((data.nFileSizeHigh as u64) << 32) | data.nFileSizeLow as u64;
-        }
-        n += 1;
-        // Huge directories: show progress and react to cancelling now and then.
-        if n.is_multiple_of(4096) {
-            size.bytes.fetch_add(std::mem::take(&mut bytes), Ordering::Relaxed);
-            if size.cancelled() {
-                break;
-            }
+        let dots = name == [b'.' as u16] || name == [b'.' as u16, b'.' as u16];
+        if !dots && !f(name, &data) {
+            break;
         }
         if let Err(e) = unsafe { FindNextFileW(handle, &mut data) } {
-            if e.code() != ERROR_NO_MORE_FILES.to_hresult() {
-                size.incomplete.store(true, Ordering::Relaxed);
-            }
+            complete = e.code() == ERROR_NO_MORE_FILES.to_hresult();
             break;
         }
     }
     unsafe {
         let _ = FindClose(handle);
     }
-    size.bytes.fetch_add(bytes, Ordering::Relaxed);
-    subdirs
+    complete
+}
+
+pub(crate) fn is_dir(data: &WIN32_FIND_DATAW) -> bool {
+    data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 != 0
+}
+
+/// Junction or directory symlink: not followed (would count twice or loop).
+pub(crate) fn is_dir_link(data: &WIN32_FIND_DATAW) -> bool {
+    data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0
+        && matches!(data.dwReserved0, IO_REPARSE_TAG_MOUNT_POINT | IO_REPARSE_TAG_SYMLINK)
+}
+
+pub(crate) fn file_size(data: &WIN32_FIND_DATAW) -> u64 {
+    ((data.nFileSizeHigh as u64) << 32) | data.nFileSizeLow as u64
+}
+
+/// `dir\name`.
+pub(crate) fn child(dir: &[u16], name: &[u16]) -> Vec<u16> {
+    let mut path = Vec::with_capacity(dir.len() + 1 + name.len());
+    path.extend_from_slice(dir);
+    if path.last() != Some(&(b'\\' as u16)) {
+        path.push(b'\\' as u16);
+    }
+    path.extend_from_slice(name);
+    path
 }
 
 /// Start counting the folder `dir`; `notify` is posted when done.

@@ -8,7 +8,7 @@ use crate::app::text_input::TextInput;
 use crate::sys::gfx::{Canvas, Gfx, Rect, rect};
 use crate::theme::Theme;
 
-pub(crate) const HINTS: [(&str, &str); 12] = [
+pub(crate) const HINTS: [(&str, &str); 13] = [
     ("Tab", "Seite"),
     ("F3", "Ansehen"),
     ("Einfg", "Markieren"),
@@ -20,24 +20,30 @@ pub(crate) const HINTS: [(&str, &str); 12] = [
     ("F8", "Löschen"),
     ("Alt+F1/F2", "Laufwerk"),
     ("Strg+L", "Pfad"),
+    ("Alt+F7", "Suchen"),
     ("Strg+,", "Optionen"),
 ];
 
-/// Text input box with caret; scrolls horizontally to keep the caret visible.
-pub(crate) fn draw_input(c: &Canvas, gfx: &Gfx, t: &Theme, r: Rect, input: &TextInput, caret_x: f32) {
+/// Text input box; with `caret_x` (focused) it shows the caret and scrolls horizontally to keep
+/// it visible.
+pub(crate) fn draw_input(c: &Canvas, gfx: &Gfx, t: &Theme, r: Rect, input: &TextInput, caret_x: Option<f32>) {
     c.fill_round(r, 5.0, t.edit_bg);
-    c.stroke_round(r, 5.0, 1.0, t.accent);
+    c.stroke_round(r, 5.0, 1.0, if caret_x.is_some() { t.accent } else { t.popup_border });
+    let focused = caret_x.is_some();
+    let caret_x = caret_x.unwrap_or(0.0);
     let inner = rect(r.left + 6.0, r.top, r.right - r.left - 12.0, r.bottom - r.top);
     let shift = (caret_x - (inner.right - inner.left) + 4.0).max(0.0);
     c.clip(inner);
-    if input.all {
+    if input.all && focused {
         let tw = gfx.measure(&input.text, &c.fonts.name);
         let sel = rect(inner.left - shift - 1.0, inner.top + 5.0, tw + 2.0, inner.bottom - inner.top - 10.0);
         c.fill_round(sel, 2.0, t.cursor_active);
     }
     c.text(&input.text, &c.fonts.name, rect(inner.left - shift, inner.top, 10000.0, inner.bottom - inner.top), t.text);
-    let caret = inner.left - shift + caret_x;
-    c.fill(rect(caret, inner.top + 5.0, 1.5, inner.bottom - inner.top - 10.0), t.accent);
+    if focused {
+        let caret = inner.left - shift + caret_x;
+        c.fill(rect(caret, inner.top + 5.0, 1.5, inner.bottom - inner.top - 10.0), t.accent);
+    }
     c.unclip();
 }
 

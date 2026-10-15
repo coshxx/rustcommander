@@ -26,6 +26,13 @@ impl App {
         if self.drag.is_some() || matches!(self.mode, Mode::Dialog(_) | Mode::Conflict(_)) {
             return false;
         }
+        if let Mode::Find = self.mode {
+            if !right {
+                self.find_click(x, y, double);
+                self.invalidate();
+            }
+            return false;
+        }
         if let Mode::Options { .. } = self.mode {
             match self.option_at(x, y) {
                 Some(Some(i)) if !right => self.toggle_option(i),
@@ -264,6 +271,11 @@ impl App {
 
     /// Wheel scrolls the panel under the mouse, three rows per notch; the cursor stays.
     pub fn on_wheel(&mut self, x: f32, delta: i16) {
+        if let Mode::Find = self.mode {
+            self.find_wheel(-(delta as isize) * 3 / 120);
+            self.invalidate();
+            return;
+        }
         let (w, _) = self.gfx.size_dips(self.hwnd);
         let p = if x < self.panel_x(1, w).0 { 0 } else { 1 };
         self.panels[p].scroll(-(delta as isize) * 3 / 120);

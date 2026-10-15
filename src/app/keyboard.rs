@@ -68,6 +68,7 @@ impl App {
                 }
                 true
             }
+            Mode::Find => self.find_key(vk, ctrl, shift),
             Mode::Conflict(_) => match vk {
                 VK_RETURN => {
                     self.answer_conflict(Answer::Overwrite);
@@ -212,13 +213,18 @@ impl App {
     }
 
     /// Alt+F1 / Alt+F2: drive popup for the left / right panel; Alt+Shift+Enter: count the
-    /// size of every folder.
+    /// size of every folder; Alt+F7: file search.
     pub fn on_syskey(&mut self, vk: VIRTUAL_KEY) -> bool {
         if !matches!(self.mode, Mode::Normal | Mode::Drives(_)) {
             return false;
         }
         if vk == VK_RETURN && matches!(self.mode, Mode::Normal) && win::key_down(VK_SHIFT) {
             self.count_all_sizes();
+            self.invalidate();
+            return true;
+        }
+        if vk == VK_F7 && matches!(self.mode, Mode::Normal) {
+            self.open_find();
             self.invalidate();
             return true;
         }
@@ -254,6 +260,7 @@ impl App {
                 }
             }
             Mode::Options { .. } => {}
+            Mode::Find => self.find_char(c),
             Mode::Conflict(_) => match char::from_u32(fold_case(c)) {
                 Some('s') => self.answer_conflict(Answer::Skip),
                 Some('a') => self.answer_conflict(Answer::OverwriteAll),

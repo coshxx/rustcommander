@@ -257,6 +257,10 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
             open_listers(cell);
             LRESULT(0)
         }
+        app::WM_APP_FIND => {
+            cell.with(|app| app.on_find_event());
+            LRESULT(0)
+        }
         app::WM_APP_CONTEXT => {
             show_context_menu(cell, hwnd);
             LRESULT(0)
