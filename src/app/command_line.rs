@@ -169,19 +169,14 @@ impl App {
         }
     }
 
-    /// `D:`: like the drive list, staying in the current folder if it is on that drive already.
+    /// `D:`: like the drive list (see `switch_drive`).
     fn go_to_drive(&mut self, d: char) -> bool {
         let root = PathBuf::from(format!("{d}:\\"));
         if !root.exists() {
             self.notify(tf("notice.no_drive", &[("drive", &format!("{d}:"))]), Tone::Error);
             return false;
         }
-        let a = self.active;
-        let on_drive =
-            self.panels[a].dir.to_str().and_then(|s| s.chars().next()).is_some_and(|c| c.eq_ignore_ascii_case(&d));
-        if !on_drive {
-            self.navigate(a, root, None);
-        }
+        self.switch_drive(self.active, d as u8);
         true
     }
 

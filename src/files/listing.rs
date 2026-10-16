@@ -242,6 +242,8 @@ pub struct Pending {
     /// Reload of the same directory: keep the cursor on whatever entry it is on when the
     /// result arrives (the user may have moved it meanwhile).
     pub keep_cursor: bool,
+    /// Loading a remembered folder: if it fails, go on with its parent.
+    pub walk_up: bool,
     pub cancel: Arc<AtomicBool>,
     pub started: Instant,
 }

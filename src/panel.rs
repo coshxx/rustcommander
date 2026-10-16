@@ -1,6 +1,6 @@
 //! State of one file list: directory, entries, sort order, cursor, scroll position, quick search.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -51,6 +51,8 @@ pub struct Panel {
     pub sizes: HashMap<Box<[u16]>, Arc<DirSize>>,
     /// Column and direction; kept when changing directories.
     pub sort: Sort,
+    /// The last folder loaded on each drive (`b'C'` …), for switching drives (see `drive_target`).
+    pub drive_dirs: BTreeMap<u8, PathBuf>,
 }
 
 /// Outcome of `Panel::apply`.
@@ -63,15 +65,32 @@ pub enum Applied {
     Failed {
         path: PathBuf,
     },
+    /// A remembered folder is gone: try its parent (see `Panel::navigate_remembered`).
+    Retry {
+        path: PathBuf,
+    },
 }
 
 impl Panel {
+    /// The folder shown, or inside an archive the folder holding it.
+    pub fn folder(&self) -> &Path {
+        self.archive.as_deref().and_then(Path::parent).unwrap_or(&self.dir)
+    }
+
     /// Load `path` in the background; `select` = entry to put the cursor on.
     pub fn navigate(&mut self, index: usize, path: PathBuf, select: Option<Box<[u16]>>, sink: &LoadSink) {
         if path != self.dir {
             self.clear_sizes();
         }
-        self.start_load(index, path, select, false, sink);
+        self.start_load(index, path, select, false, false, sink);
+    }
+
+    /// Like `navigate`, to a remembered folder: if it can't be read, its parents are tried.
+    pub fn navigate_remembered(&mut self, index: usize, path: PathBuf, sink: &LoadSink) {
+        if path != self.dir {
+            self.clear_sizes();
+        }
+        self.start_load(index, path, None, false, true, sink);
     }
 
     fn start_load(
@@ -80,6 +99,7 @@ impl Panel {
         path: PathBuf,
         select: Option<Box<[u16]>>,
         keep_cursor: bool,
+        walk_up: bool,
         sink: &LoadSink,
     ) {
         if let Some(p) = self.pending.take() {
@@ -92,6 +112,7 @@ impl Panel {
             path: path.clone(),
             select,
             keep_cursor,
+            walk_up,
             cancel: cancel.clone(),
             started: Instant::now(),
         });
@@ -114,7 +135,7 @@ impl Panel {
             return;
         }
         let search = std::mem::take(&mut self.search);
-        self.start_load(index, self.dir.clone(), None, true, sink);
+        self.start_load(index, self.dir.clone(), None, true, false, sink);
         self.search = search;
     }
 
@@ -160,6 +181,10 @@ impl Panel {
                 self.bytes = l.bytes;
                 self.archive = l.archive;
                 self.error = None;
+                let folder = self.folder().to_path_buf();
+                if let Some(d) = drive_letter(&folder) {
+                    self.drive_dirs.insert(d, folder);
+                }
                 if same_dir {
                     let names: HashSet<&[u16]> = self.entries.iter().filter(|e| e.is_dir()).map(|e| &*e.name).collect();
                     self.sizes.retain(|name, size| {
@@ -197,6 +222,11 @@ impl Panel {
                 Applied::Ok { dir_changed: !same_dir }
             }
             Err(e) => {
+                if p.walk_up
+                    && let Some(parent) = p.path.parent()
+                {
+                    return Applied::Retry { path: parent.to_path_buf() };
+                }
                 self.error = Some(format!("{}: {}", p.path.display(), e.trim()));
                 Applied::Failed { path: p.path }
             }
@@ -439,5 +469,68 @@ impl Panel {
             Some(p) if p.started.elapsed().as_millis() >= crate::app::LOADING_DELAY_MS as u128 => &p.path,
             _ => &self.dir,
         }
+    }
+}
+
+/// `b'C'` for `c:\…` (upper case); `None` for UNC paths.
+pub fn drive_letter(path: &Path) -> Option<u8> {
+    match path.as_os_str().as_encoded_bytes() {
+        [d, b':', ..] if d.is_ascii_alphabetic() => Some(d.to_ascii_uppercase()),
+        _ => None,
+    }
+}
+
+/// Where switching `panel` to drive `d` goes: `None` if it is on it already; else the other
+/// panel's folder if that is on `d`, the folder last loaded there, or the root. `true` = a
+/// remembered folder (may be gone by now).
+pub fn drive_target(panel: &Panel, other: &Panel, d: u8) -> Option<(PathBuf, bool)> {
+    if drive_letter(panel.folder()) == Some(d) {
+        return None;
+    }
+    if drive_letter(other.folder()) == Some(d) {
+        return Some((other.folder().to_path_buf(), false));
+    }
+    Some(match panel.drive_dirs.get(&d) {
+        Some(dir) => (dir.clone(), true),
+        None => (PathBuf::from(format!("{}:\\", d as char)), false),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(dir: &str) -> Panel {
+        Panel { dir: dir.into(), ..Panel::default() }
+    }
+
+    #[test]
+    fn letters() {
+        assert_eq!(drive_letter(Path::new(r"c:\x")), Some(b'C'));
+        assert_eq!(drive_letter(Path::new(r"D:\")), Some(b'D'));
+        assert_eq!(drive_letter(Path::new(r"\server\share")), None);
+        assert_eq!(drive_letter(Path::new("")), None);
+    }
+
+    #[test]
+    fn switching_drives() {
+        let mut left = at(r"D:\data");
+        let right = at(r"C:\blabla\temp");
+        // Already there: stay.
+        assert_eq!(drive_target(&left, &right, b'D'), None);
+        // The other panel is on it: its folder, even over a remembered one.
+        left.drive_dirs.insert(b'C', r"C:\projects".into());
+        assert_eq!(drive_target(&left, &right, b'C'), Some((r"C:\blabla\temp".into(), false)));
+        // Else the remembered folder, else the root.
+        left.drive_dirs.insert(b'E', r"E:\photos".into());
+        assert_eq!(drive_target(&left, &right, b'E'), Some((r"E:\photos".into(), true)));
+        assert_eq!(drive_target(&left, &right, b'F'), Some((r"F:\".into(), false)));
+    }
+
+    #[test]
+    fn other_panel_in_an_archive() {
+        let left = at(r"D:\");
+        let right = Panel { archive: Some(r"C:\dl\foo.zip".into()), ..at(r"C:\dl\foo.zip\sub") };
+        assert_eq!(drive_target(&left, &right, b'C'), Some((r"C:\dl".into(), false)));
     }
 }

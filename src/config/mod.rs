@@ -4,6 +4,7 @@
 pub mod history;
 pub(crate) mod json;
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use self::json::Value;
@@ -17,6 +18,8 @@ pub struct Config {
     pub paths: [Option<PathBuf>; 2],
     /// Sort column and direction per panel.
     pub sorts: [Sort; 2],
+    /// Per panel: the last folder on each drive (`b'C'` → `C:\x`).
+    pub drive_dirs: [BTreeMap<u8, PathBuf>; 2],
     pub active: usize,
     /// Normal window position (left, top, right, bottom) + maximized.
     pub window: Option<([i32; 4], bool)>,
@@ -91,6 +94,22 @@ fn sort_json(s: Sort) -> Value {
     obj(vec![("by", Value::Str(s.key.id().into())), ("desc", Value::Bool(s.desc))])
 }
 
+/// `{"C": "C:\\x", "D": "D:\\"}` → last folder per drive; other keys are dropped.
+fn parse_drive_dirs(v: &Value) -> BTreeMap<u8, PathBuf> {
+    let Value::Obj(members) = v else { return BTreeMap::new() };
+    members
+        .iter()
+        .filter_map(|(k, v)| match (k.as_bytes(), v.as_str()) {
+            ([d], Some(dir)) if d.is_ascii_alphabetic() => Some((d.to_ascii_uppercase(), PathBuf::from(dir))),
+            _ => None,
+        })
+        .collect()
+}
+
+fn drive_dirs_json(dirs: &BTreeMap<u8, PathBuf>) -> Value {
+    Value::Obj(dirs.iter().map(|(&d, dir)| ((d as char).to_string(), Value::Str(dir.display().to_string()))).collect())
+}
+
 fn obj(members: Vec<(&str, Value)>) -> Value {
     Value::Obj(members.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
 }
@@ -124,6 +143,9 @@ impl Config {
             cfg.active = (p.get("active").and_then(Value::as_i32) == Some(1)) as usize;
             for (i, k) in ["left_sort", "right_sort"].iter().enumerate() {
                 cfg.sorts[i] = p.get(k).and_then(parse_sort).unwrap_or_default();
+            }
+            for (i, k) in ["left_drives", "right_drives"].iter().enumerate() {
+                cfg.drive_dirs[i] = p.get(k).map(parse_drive_dirs).unwrap_or_default();
             }
         }
         cfg.window = root.get("window").and_then(parse_window);
@@ -164,6 +186,8 @@ impl Config {
                 ("right", path(&self.paths[1])),
                 ("left_sort", sort_json(self.sorts[0])),
                 ("right_sort", sort_json(self.sorts[1])),
+                ("left_drives", drive_dirs_json(&self.drive_dirs[0])),
+                ("right_drives", drive_dirs_json(&self.drive_dirs[1])),
                 ("active", Value::Num(self.active as f64)),
             ]),
         )];
@@ -227,6 +251,10 @@ mod tests {
             editor: Some(r"C:\Tools\npp\notepad++.exe".into()),
             lister: lister::Settings { window: Some(([-5, 0, 800, 600], false)), wrap: false },
             sorts: [Sort { key: SortKey::Size, desc: true }, Sort::default()],
+            drive_dirs: [
+                BTreeMap::from([(b'C', PathBuf::from(r"C:\a")), (b'D', PathBuf::from(r"D:\"))]),
+                BTreeMap::new(),
+            ],
             options: Options {
                 exact_sizes: true,
                 alt_search: false,
@@ -247,6 +275,7 @@ mod tests {
         assert!(!back.lister.wrap);
         assert_eq!(back.options, cfg.options);
         assert_eq!(back.sorts, cfg.sorts);
+        assert_eq!(back.drive_dirs, cfg.drive_dirs);
         assert_eq!(back.pack, cfg.pack);
     }
 

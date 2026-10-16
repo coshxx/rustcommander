@@ -204,6 +204,7 @@ impl App {
         for (i, panel) in panels.iter_mut().enumerate() {
             let p = cfg.paths[i].clone().or(defaults[i].clone()).unwrap_or(PathBuf::from(r"C:\"));
             panel.sort = cfg.sorts[i];
+            panel.drive_dirs = cfg.drive_dirs[i].clone();
             panel.navigate(i, p, None, &sink);
         }
         let mut timing = timing;
@@ -262,6 +263,7 @@ impl App {
             options: self.options,
             pack: self.pack,
             sorts: [self.panels[0].sort, self.panels[1].sort],
+            drive_dirs: [self.panels[0].drive_dirs.clone(), self.panels[1].drive_dirs.clone()],
             ..Default::default()
         };
         for i in 0..2 {
@@ -276,6 +278,12 @@ impl App {
     /// Load `path` into panel `i` and show "loading" if it takes long.
     pub(crate) fn navigate(&mut self, i: usize, path: PathBuf, select: Option<Box<[u16]>>) {
         self.panels[i].navigate(i, path, select, &self.sink);
+        win::set_timer(self.hwnd, TIMER_LOADING, LOADING_DELAY_MS + 10);
+    }
+
+    /// Like `navigate`, to a remembered folder: if it is gone, quietly to its nearest parent.
+    pub(crate) fn navigate_remembered(&mut self, i: usize, path: PathBuf) {
+        self.panels[i].navigate_remembered(i, path, &self.sink);
         win::set_timer(self.hwnd, TIMER_LOADING, LOADING_DELAY_MS + 10);
     }
 
@@ -323,6 +331,7 @@ impl App {
                     }
                     self.follow_rename(p);
                 }
+                Applied::Retry { path } => self.navigate_remembered(p, path),
                 Applied::Failed { path } => {
                     let dir = self.panels[p].dir.clone();
                     if dir.as_os_str().is_empty() {

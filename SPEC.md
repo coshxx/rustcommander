@@ -73,7 +73,7 @@ the steady-state frame time).
 | Ctrl+PgDn | Enter directory or archive (nothing else) |
 | Backspace, Ctrl+PgUp | Parent directory |
 | \ | Drive root (also works on German keyboard layouts) |
-| Alt+F1 / Alt+F2 | Choose drive for left / right pane |
+| Alt+F1 / Alt+F2 | Choose drive for left / right pane (where it lands: see "Switching drives" below) |
 | Ctrl+L, click on path | Edit path (Ctrl+V, environment variables) |
 | Ctrl+R, F2 | Reload |
 | Type letters | Quick search (jumps to first match), Esc cancels; with the option "Alt+letter" only Alt+letter starts it |
@@ -112,14 +112,28 @@ the steady-state frame time).
 - Enter runs the line with `cmd /c` in a new console window in the active pane's folder (inside
   an archive: the folder holding it); the window closes when the command is done. Shift+Enter
   uses `cmd /k`, the window stays open.
-- Handled by the pane instead: `D:` (switch drive; stays in the folder if it is on that drive
-  already), `cd <path>` (also `cd..`, `cd\`, `cd /d`, relative, `%VARS%`) and a bare path of an
+- Handled by the pane instead: `D:` (switch drive, like the drive list: see "Switching drives"
+  below; `D:\` always goes to the root), `cd <path>` (also `cd..`, `cd\`, `cd /d`, relative, `%VARS%`) and a bare path of an
   existing folder. A missing drive or folder shows a notice and keeps the text; otherwise the line
   is cleared.
 - Ctrl+Enter inserts the name under the cursor, Ctrl+Shift+Enter its full path (quoted if they
   contain spaces, followed by a space).
 - History: the last 50 lines (internal commands too, a repeated one moves up), Ctrl+↑/↓ browse
   them. Saved in `history.json` next to `config.json`: `{ "commands": [newest, …] }`.
+
+### Switching drives
+
+The drive list (Alt+F1/F2, click on the drive chip) and `D:` in the command line pick the folder
+on that drive like this:
+
+1. The pane is on that drive already: it stays where it is.
+2. The other pane is on that drive: its folder (inside an archive: the folder holding it).
+3. Else the folder this pane was in last on that drive. If it is gone, quietly its nearest
+   existing parent (tried in the background, a slow network drive doesn't block).
+4. Else the root.
+
+Each pane remembers its last folder per drive letter (not UNC paths), saved as `left_drives` /
+`right_drives` in `config.json`. `\` and `D:\` always go to the root.
 
 ### Mouse
 
@@ -198,7 +212,8 @@ On startup the last directories and the window position are restored
   {
     "panels": {
       "left": "C:\\…", "right": "D:\\…", "active": 1,
-      "left_sort": { "by": "size", "desc": true }, "right_sort": { "by": "name", "desc": false }
+      "left_sort": { "by": "size", "desc": true }, "right_sort": { "by": "name", "desc": false },
+      "left_drives": { "C": "C:\\…", "D": "D:\\…" }, "right_drives": { … }
     },
     "window": { "left": 100, "top": 100, "right": 1500, "bottom": 900, "maximized": false },
     "mask": "*.rs",

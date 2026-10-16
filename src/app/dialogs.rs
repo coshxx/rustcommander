@@ -13,6 +13,7 @@ use crate::files::mask::Mask;
 use crate::files::names::fold_case;
 use crate::i18n::{t, tf};
 use crate::ops::Job;
+use crate::panel::drive_target;
 use crate::sys::win::{self, Drive};
 
 pub(crate) struct DrivePopup {
@@ -106,11 +107,17 @@ impl App {
         if let Mode::Drives(d) = std::mem::replace(&mut self.mode, Mode::Normal)
             && let Some(drive) = d.drives.get(idx)
         {
-            let root = String::from_utf16_lossy(&drive.root[..3]);
-            // Same drive: stay in the current directory.
-            if !self.panels[d.panel].dir.starts_with(&root) {
-                self.navigate(d.panel, PathBuf::from(root), None);
-            }
+            self.switch_drive(d.panel, drive.root[0] as u8);
+        }
+    }
+
+    /// Switch `panel` to drive `d` (`b'C'`): stays if it is on it already, else goes to the other
+    /// panel's folder there, the folder it was in last on that drive, or the root.
+    pub(crate) fn switch_drive(&mut self, panel: usize, d: u8) {
+        match drive_target(&self.panels[panel], &self.panels[panel ^ 1], d.to_ascii_uppercase()) {
+            Some((dir, true)) => self.navigate_remembered(panel, dir),
+            Some((dir, false)) => self.navigate(panel, dir, None),
+            None => {}
         }
     }
 
