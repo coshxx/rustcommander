@@ -132,6 +132,18 @@ impl App {
         for (r, idx) in (p.top..end).enumerate() {
             self.draw_row(c, a, cols, idx, top + r as f32 * ROW_H, caret_x);
         }
+        // Files dragged over the panel: outline the folder row or the list they would go into.
+        if let Some(d) = self.drop_hover.filter(|d| d.panel == a.index) {
+            let t = self.theme;
+            match d.row {
+                Some(row) if (p.top..end).contains(&row) => {
+                    let y = top + (row - p.top) as f32 * ROW_H;
+                    c.stroke_round(rect(a.x + 5.0, y + 2.0, a.width - 14.0, ROW_H - 4.0), 4.0, 2.0, t.accent);
+                }
+                Some(_) => {}
+                None => c.stroke_round(rect(a.x + 3.0, top + 2.0, a.width - 6.0, lh - 4.0), 4.0, 2.0, t.accent),
+            }
+        }
         c.unclip();
     }
 

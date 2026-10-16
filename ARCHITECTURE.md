@@ -28,6 +28,7 @@ thread touches.
 | `app/` | The application state and everything that changes it. |
 | `app/mod.rs` | `App` struct, `Mode` (normal / dialog / popup …), timers, directory load results. |
 | `app/keyboard.rs`, `app/mouse.rs` | Input handling. |
+| `app/drop.rs` | Files dropped onto a panel: target, highlight, copy / move dialog. |
 | `app/dialogs.rs` | Dialogs, drive popup, path editing, mark by mask. |
 | `app/find.rs` | Search dialog (Alt+F7): fields, hits, keys; the last search is kept in `App::find`. |
 | `app/options.rs` | Options dialog (Ctrl+,): the list of switches; toggling saves the config. |
@@ -43,7 +44,7 @@ thread touches.
 | `files/` | Files, but not operations on them: listing directories (`listing`), file search (`find`), folder sizes and the shared directory reader `scan` (`dirsize`), sort order (`sort`, pure and tested), archives as read-only directories (`archive`), UTF-16 names and natural sort (`names`), marking masks (`mask`), change notifications (`watch`), temp files for opening entries of archives (`temp`). |
 | `ops/` | File operations on a worker thread: `copy`, `moving`, `delete`, `extract` (from archives), `pack` (into a new zip/7z, unpacking whole archives); `mod.rs` holds the public API (`Job`, `Handle`, `Event`) and the shared worker logic. |
 | `lister/` | The F3 viewer: its own windows (`window`), state and commands (`mod.rs`), input, drawing, the byte → screen line logic (`text`, pure and tested) and the search (`search`). |
-| `sys/` | Thin safe wrappers around Win32 (`win`), Direct2D/DirectWrite (`gfx`), libarchive from Windows' `archiveint.dll` (`libarchive`), memory-mapped files (`mapped`) and the shell context menu (`shell_menu`). |
+| `sys/` | Thin safe wrappers around Win32 (`win`), Direct2D/DirectWrite (`gfx`), libarchive from Windows' `archiveint.dll` (`libarchive`), memory-mapped files (`mapped`), the shell context menu and dragging out (`shell_menu`) and the window as an OLE drop target (`drop_target`). |
 | `config/` | Settings file `config.json` (`mod.rs`, incl. `Options`), the command line history `history.json` (`history`) and a minimal JSON parser/writer (`json`). |
 | `i18n.rs`, `../i18n/*.json` | Translations: current language, `t` / `tf` / `tn` lookups; texts embedded from the JSON files. |
 | `theme.rs`, `timing.rs` | Colors, `--timing` measurements. |

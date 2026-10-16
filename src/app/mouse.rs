@@ -233,6 +233,7 @@ impl App {
         let Some(e) = p.entries.get(row).filter(|e| e.kind != Kind::Parent) else { return };
         let paths = if e.marked { p.targets() } else { vec![p.dir.join(e.os_name())] };
         self.drag_request = paths;
+        self.drag_source = Some(panel);
         SendHwnd::new(self.hwnd).post(WM_APP_DRAG);
     }
 

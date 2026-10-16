@@ -29,14 +29,15 @@ pub(crate) struct RunningJob {
     pub(crate) handle: ops::Handle,
     pub(crate) title: &'static str,
     pub(crate) progress: ops::Progress,
-    source_panel: usize,
+    /// Its marks are cleared after a successful job.
+    source_panel: Option<usize>,
     pub(crate) started: Instant,
     then: AfterJob,
 }
 
 impl App {
     /// Start a file operation; the progress card appears after `JOB_CARD_DELAY_MS`.
-    pub(crate) fn start_job(&mut self, job: Job, title: &'static str, source_panel: usize) {
+    pub(crate) fn start_job(&mut self, job: Job, title: &'static str, source_panel: Option<usize>) {
         let handle = ops::start(job, Some((SendHwnd::new(self.hwnd), WM_APP_JOB)));
         self.job = Some(RunningJob {
             handle,
@@ -60,7 +61,7 @@ impl App {
         match temp::new_dir() {
             Ok(dir) => {
                 let title = t(if then == AfterJob::View { "job.view" } else { "job.open" });
-                self.start_job(Job::Extract { sources: vec![path], dest: dir }, title, panel);
+                self.start_job(Job::Extract { sources: vec![path], dest: dir }, title, Some(panel));
                 if let Some(job) = &mut self.job {
                     job.then = then;
                 }
@@ -113,8 +114,11 @@ impl App {
             (tf("job.done", &[("title", &job.title), ("items", &items)]), Tone::Success)
         };
         self.notify(text, tone);
-        if s.errors.is_empty() && !s.cancelled {
-            self.panels[job.source_panel].clear_marks();
+        if s.errors.is_empty()
+            && !s.cancelled
+            && let Some(p) = job.source_panel
+        {
+            self.panels[p].clear_marks();
         }
         for i in 0..2 {
             let dir = self.panels[i].dir.clone();

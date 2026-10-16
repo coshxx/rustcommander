@@ -60,7 +60,16 @@ impl App {
         let input = Some(TextInput::new(utf16(&dest.display().to_string())));
         let extra = Extra::Pack { format, level: self.pack.level };
         self.panels[a].search.clear();
-        self.mode = Mode::Dialog(Dialog { kind: DialogKind::Pack, panel: a, sources, message, input, extra, focus: 0 });
+        self.mode = Mode::Dialog(Dialog {
+            kind: DialogKind::Pack,
+            panel: a,
+            sources,
+            message,
+            input,
+            extra,
+            focus: 0,
+            keep_marks: false,
+        });
     }
 
     /// Alt+F9: unpack the marked archives (or the one under the cursor).
@@ -101,6 +110,7 @@ impl App {
             input: Some(TextInput::new(utf16(&dest))),
             extra,
             focus: 0,
+            keep_marks: false,
         });
     }
 
@@ -180,7 +190,7 @@ impl App {
             Extra::None => return,
         };
         self.config(self.hwnd).save();
-        self.start_job(job, d.kind.title(), d.panel);
+        self.start_job(job, d.kind.title(), Some(d.panel));
     }
 }
 

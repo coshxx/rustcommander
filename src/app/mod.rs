@@ -4,6 +4,7 @@
 
 pub(crate) mod command_line;
 pub(crate) mod dialogs;
+pub(crate) mod drop;
 pub(crate) mod find;
 pub(crate) mod format;
 pub(crate) mod jobs;
@@ -23,6 +24,7 @@ use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::WM_APP;
 
 use crate::app::dialogs::{Dialog, DrivePopup};
+use crate::app::drop::DropHover;
 use crate::app::jobs::{AfterJob, RunningJob};
 use crate::app::layout::ROW_H;
 use crate::app::mouse::Drag;
@@ -179,6 +181,10 @@ pub struct App {
     pub(crate) context_request: Option<ContextRequest>,
     /// Items of one directory to drag out; dragged by `window.rs` on `WM_APP_DRAG`.
     pub(crate) drag_request: Vec<PathBuf>,
+    /// Panel the files being dragged out come from, until the drag ends.
+    pub(crate) drag_source: Option<usize>,
+    /// Where files dragged over the window would be dropped (highlighted).
+    pub(crate) drop_hover: Option<DropHover>,
     /// The last file search (kept when the dialog is closed).
     pub(crate) find: Option<find::Find>,
     /// For `--timing`: the first frame / the first frame with both panels loaded was drawn.
@@ -236,6 +242,8 @@ impl App {
             view_requests: Vec::new(),
             context_request: None,
             drag_request: Vec::new(),
+            drag_source: None,
+            drop_hover: None,
             find: None,
             painted: false,
             painted_content: false,

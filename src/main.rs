@@ -61,6 +61,7 @@ fn main() {
         app.gfx.set_dpi(unsafe { GetDpiForWindow(hwnd) } as f32);
     });
     unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, cell as isize) };
+    window::accept_drops(hwnd);
     cell_ref.with(|app| app.timing.mark("before ShowWindow"));
     show_window(hwnd, cfg.window);
     // Leftovers from files opened out of archives in earlier sessions.

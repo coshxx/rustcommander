@@ -128,6 +128,7 @@ the steady-state frame time).
 | Click / double-click | Set cursor / open |
 | Slow second click in the name column of the entry under the cursor | Rename in place (see below) |
 | Left drag (past the system drag threshold) | Drag & drop out of the app (Explorer, desktop, mail clients, browsers like web Gmail): the row, or all marked rows if it is one of them; the marks stay. The target picks copy, move or link (Explorer's defaults: move on the same drive, Ctrl copies). Not on `..` or inside archives. |
+| Drop files onto a panel (from the other panel, Explorer, the desktop …) | Opens the copy dialog (Shift held on release: the move dialog) with the target filled in: the folder row under the mouse (outlined; not `..`), else the panel's directory (the list is outlined). The dialog runs like F5/F6; dragged from a panel, its marks are cleared afterwards like with F5. Only real files (no virtual files like mail attachments, no text or links). The source is always told "copied", so it never deletes anything itself. Refused (no-drop cursor) while a job runs or a dialog is open, over archives, the status bars, the command line and the key bar, and into the directory the files are in, onto one of them or into a folder inside them. |
 | Right click | Set cursor and toggle mark |
 | Right drag | Every row passed gets the state of the first one; scrolls automatically past the list's edges |
 | Right press held 0.5 s on a row | Shell context menu (the row's mark is undone) |

@@ -3,7 +3,7 @@
 //! `packing.rs`).
 
 use std::os::windows::ffi::OsStrExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::app::format::{describe, parse_path, utf16, valid_name};
 use crate::app::text_input::TextInput;
@@ -73,6 +73,8 @@ pub(crate) struct Dialog {
     pub(crate) extra: Extra,
     /// 0 = the input, 1.. = a choice row (Tab moves).
     pub(crate) focus: usize,
+    /// Files dropped from another program: `panel`'s marks have nothing to do with them.
+    pub(crate) keep_marks: bool,
 }
 
 /// What a dialog shows below its input.
@@ -156,17 +158,8 @@ impl App {
         let (sources, message, input) = match kind {
             DialogKind::Copy | DialogKind::Extract | DialogKind::Move => {
                 let sources = p.targets();
-                let mut dest = self.panels[a ^ 1].dir.display().to_string();
-                if !dest.ends_with('\\') {
-                    dest.push('\\');
-                }
-                let key = match kind {
-                    DialogKind::Copy => "dialog.copy_to",
-                    DialogKind::Extract => "dialog.extract_to",
-                    _ => "dialog.move_to",
-                };
-                let msg = tf(key, &[("what", &describe(&sources))]);
-                (sources, msg, Some(TextInput::new(utf16(&dest))))
+                let (msg, input) = transfer_prompt(kind, &sources, &self.panels[a ^ 1].dir);
+                (sources, msg, Some(input))
             }
             DialogKind::Delete { recycle } => {
                 let sources = p.targets();
@@ -204,7 +197,16 @@ impl App {
             return;
         }
         self.panels[a].search.clear();
-        self.mode = Mode::Dialog(Dialog { kind, panel: a, sources, message, input, extra: Extra::None, focus: 0 });
+        self.mode = Mode::Dialog(Dialog {
+            kind,
+            panel: a,
+            sources,
+            message,
+            input,
+            extra: Extra::None,
+            focus: 0,
+            keep_marks: false,
+        });
     }
 
     /// Enter in a dialog: start the job (or apply the mask).
@@ -258,7 +260,7 @@ impl App {
                 Job::MkDir { path: dir.join(&input) }
             }
         };
-        self.start_job(job, d.kind.title(), d.panel);
+        self.start_job(job, d.kind.title(), (!d.keep_marks).then_some(d.panel));
     }
 
     /// Shift+F4: create `name` in the panel's directory if it doesn't exist, put the cursor on it
@@ -295,4 +297,19 @@ impl App {
             self.mask = input;
         }
     }
+}
+
+/// Message and prefilled target (`dest` with a trailing backslash) of a copy, extract or move
+/// dialog.
+pub(crate) fn transfer_prompt(kind: DialogKind, sources: &[PathBuf], dest: &Path) -> (String, TextInput) {
+    let mut dest = dest.display().to_string();
+    if !dest.ends_with('\\') {
+        dest.push('\\');
+    }
+    let key = match kind {
+        DialogKind::Copy => "dialog.copy_to",
+        DialogKind::Extract => "dialog.extract_to",
+        _ => "dialog.move_to",
+    };
+    (tf(key, &[("what", &describe(sources))]), TextInput::new(utf16(&dest)))
 }

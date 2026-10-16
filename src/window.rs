@@ -22,6 +22,7 @@ use windows::core::{HSTRING, PCWSTR, w};
 
 use crate::app::App;
 use crate::app::dialogs::DialogKind;
+use crate::sys::drop_target::{self, DropEvent};
 use crate::sys::shell_menu::{self, Chosen};
 use crate::sys::win;
 use crate::{app, lister, panel, theme};
@@ -320,6 +321,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
             LRESULT(0)
         }
         WM_DESTROY => {
+            drop_target::revoke(hwnd);
             unsafe { PostQuitMessage(0) };
             LRESULT(0)
         }
@@ -378,10 +380,63 @@ fn drag_out(cell: &AppCell, hwnd: HWND) {
             let _ = ReleaseCapture();
         }
     }
-    if let Err(e) = shell_menu::drag_out(hwnd, &paths) {
-        cell.with(|app| app.notify(e, app::Tone::Error));
-    }
-    cell.with(|app| app.invalidate());
+    let result = shell_menu::drag_out(hwnd, &paths);
+    cell.with(|app| {
+        app.drag_source = None;
+        if let Err(e) = result {
+            app.notify(e, app::Tone::Error);
+        }
+        app.invalidate();
+    });
+}
+
+/// Make the window a drop target for files (see `app/drop.rs`). Called once the window has its
+/// `AppCell`.
+pub(crate) fn accept_drops(hwnd: HWND) {
+    drop_target::register(
+        hwnd,
+        Box::new(move |ev| {
+            let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *const AppCell;
+            if ptr.is_null() {
+                return false;
+            }
+            // SAFETY: see `wndproc`; the target is revoked before the window is destroyed.
+            let cell = unsafe { &*ptr };
+            let dips = |app: &App, at: POINT| {
+                let k = 96.0 / app.gfx.dpi;
+                (at.x as f32 * k, at.y as f32 * k)
+            };
+            match ev {
+                DropEvent::Over { paths, at } => cell
+                    .with(|app| {
+                        let (x, y) = dips(app, at);
+                        app.on_drop_over(x, y, paths)
+                    })
+                    .unwrap_or(false),
+                DropEvent::Leave => {
+                    cell.with(|app| app.on_drop_leave());
+                    false
+                }
+                DropEvent::Drop { paths, at, mov } => {
+                    let taken = cell
+                        .with(|app| {
+                            let (x, y) = dips(app, at);
+                            app.on_drop(x, y, paths, mov)
+                        })
+                        .unwrap_or(false);
+                    // Dropped from another program: the dialog wants the keyboard. Activation
+                    // sends messages synchronously, hence outside of `with`.
+                    if taken {
+                        unsafe {
+                            let _ = SetForegroundWindow(hwnd);
+                            let _ = SetFocus(Some(hwnd));
+                        }
+                    }
+                    taken
+                }
+            }
+        }),
+    );
 }
 
 /// Moving to a monitor with another DPI: new fonts/scale, then the size Windows suggests.
