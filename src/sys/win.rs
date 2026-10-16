@@ -17,8 +17,8 @@ use windows::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificL
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VIRTUAL_KEY};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    KillTimer, PostMessageW, SPI_GETKEYBOARDDELAY, SW_SHOWNORMAL, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetTimer,
-    SystemParametersInfoW,
+    GetSystemMetrics, KillTimer, PostMessageW, SM_CXDRAG, SM_CYDRAG, SPI_GETKEYBOARDDELAY, SW_SHOWNORMAL,
+    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetTimer, SystemParametersInfoW,
 };
 use windows::core::{PCWSTR, w};
 
@@ -75,6 +75,11 @@ pub fn repeat_delay_ms() -> u32 {
         )
     };
     (v.min(3) + 1) * 250
+}
+
+/// How far (in pixels) the mouse must move with a button held before a drag starts.
+pub fn drag_threshold() -> (i32, i32) {
+    unsafe { (GetSystemMetrics(SM_CXDRAG), GetSystemMetrics(SM_CYDRAG)) }
 }
 
 pub fn key_down(vk: VIRTUAL_KEY) -> bool {

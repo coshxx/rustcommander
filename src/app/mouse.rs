@@ -1,11 +1,12 @@
-//! Mouse input: clicks, right-click marking, scrollbar dragging and the wheel.
+//! Mouse input: clicks, right-click marking, scrollbar dragging, dragging files out and the wheel.
 
 use std::time::Instant;
 
 use crate::app::layout::{Hit, ROW_H};
 use crate::app::rename::double_click_ms;
-use crate::app::{App, Mode, TIMER_DRAG, TIMER_LONG_PRESS};
-use crate::sys::win;
+use crate::app::{App, Mode, TIMER_DRAG, TIMER_LONG_PRESS, WM_APP_DRAG};
+use crate::files::listing::Kind;
+use crate::sys::win::{self, SendHwnd};
 
 const DRAG_REPEAT_MS: u32 = 50;
 /// Right button held this long on one row opens the shell context menu.
@@ -21,6 +22,9 @@ pub(crate) enum Drag {
     /// Right button held: every row the mouse passes gets `marked`. `origin` = row and position
     /// of the press (a long press there opens the context menu instead).
     Mark { panel: usize, marked: bool, last: usize, y: f32, origin: (usize, f32, f32) },
+    /// Left button pressed on a row at `at`: moving past the system drag threshold drags the
+    /// row (or all marked rows, if it is one of them) out of the app.
+    Out { panel: usize, row: usize, at: (f32, f32) },
 }
 
 impl App {
@@ -112,8 +116,18 @@ impl App {
                 if double && quick {
                     self.last_click = None;
                     self.open_current(false);
-                } else if again && self.in_name_column(p, x) {
-                    self.arm_rename(p, row, (x, y));
+                } else {
+                    if again && self.in_name_column(p, x) {
+                        self.arm_rename(p, row, (x, y));
+                    }
+                    let panel = &self.panels[p];
+                    if matches!(self.mode, Mode::Normal)
+                        && panel.archive.is_none()
+                        && panel.entries[row].kind != Kind::Parent
+                    {
+                        self.drag = Some(Drag::Out { panel: p, row, at: (x, y) });
+                        capture = true;
+                    }
                 }
             }
             Hit::Scrollbar(p) if !right => capture = self.press_scrollbar(p, y),
@@ -138,7 +152,7 @@ impl App {
     pub fn on_button_up(&mut self, x: f32, y: f32, right: bool) -> bool {
         match self.drag {
             Some(Drag::Mark { .. }) if !right => return false,
-            Some(Drag::Thumb { .. } | Drag::Page { .. }) if right => return false,
+            Some(Drag::Thumb { .. } | Drag::Page { .. } | Drag::Out { .. }) if right => return false,
             None => return false,
             _ => {}
         }
@@ -177,6 +191,15 @@ impl App {
                     self.arm_drag_timer(DRAG_REPEAT_MS);
                 }
             }
+            Some(Drag::Out { panel, row, at }) => {
+                let (panel, row, at) = (*panel, *row, *at);
+                self.pending_rename_moved(x, y);
+                let (cx, cy) = win::drag_threshold();
+                let k = 96.0 / self.gfx.dpi;
+                if (x - at.0).abs() > cx as f32 * k || (y - at.1).abs() > cy as f32 * k {
+                    self.start_drag_out(panel, row);
+                }
+            }
             None => {
                 self.pending_rename_moved(x, y);
                 let hit = self.hit(x, y);
@@ -199,6 +222,18 @@ impl App {
         if self.hover_bar.take().is_some() | self.hover_header.take().is_some() | gear {
             self.invalidate();
         }
+    }
+
+    /// Hand the dragged items to `window.rs`, which runs the shell's drag loop on `WM_APP_DRAG`
+    /// (it releases the mouse capture first).
+    fn start_drag_out(&mut self, panel: usize, row: usize) {
+        self.cancel_drag();
+        self.cancel_pending_rename();
+        let p = &self.panels[panel];
+        let Some(e) = p.entries.get(row).filter(|e| e.kind != Kind::Parent) else { return };
+        let paths = if e.marked { p.targets() } else { vec![p.dir.join(e.os_name())] };
+        self.drag_request = paths;
+        SendHwnd::new(self.hwnd).post(WM_APP_DRAG);
     }
 
     /// Start `TIMER_DRAG` unless it is running already.

@@ -127,6 +127,7 @@ the steady-state frame time).
 |---|---|
 | Click / double-click | Set cursor / open |
 | Slow second click in the name column of the entry under the cursor | Rename in place (see below) |
+| Left drag (past the system drag threshold) | Drag & drop out of the app (Explorer, desktop, mail clients, browsers like web Gmail): the row, or all marked rows if it is one of them; the marks stay. The target picks copy, move or link (Explorer's defaults: move on the same drive, Ctrl copies). Not on `..` or inside archives. |
 | Right click | Set cursor and toggle mark |
 | Right drag | Every row passed gets the state of the first one; scrolls automatically past the list's edges |
 | Right press held 0.5 s on a row | Shell context menu (the row's mark is undone) |

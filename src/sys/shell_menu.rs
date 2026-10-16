@@ -1,4 +1,5 @@
-//! The Windows shell context menu (Explorer's right-click menu) for items of one directory.
+//! The Windows shell context menu (Explorer's right-click menu) for items of one directory, and
+//! dragging such items out of the app (`drag_out`).
 //!
 //! `show` runs a modal menu loop, so it must be called outside of `AppCell::with`. While the menu
 //! is open, `handle_menu_msg` forwards the owner-draw and submenu messages ("Senden an",
@@ -8,13 +9,14 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
-use windows::Win32::System::Com::CoTaskMemFree;
+use windows::Win32::System::Com::{CoTaskMemFree, IDataObject};
+use windows::Win32::System::Ole::{DROPEFFECT_COPY, DROPEFFECT_LINK, DROPEFFECT_MOVE};
 use windows::Win32::UI::Input::KeyboardAndMouse::{VK_CONTROL, VK_SHIFT};
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
     CMF_CANRENAME, CMF_EXPLORE, CMF_EXTENDEDVERBS, CMF_NORMAL, CMIC_MASK_CONTROL_DOWN, CMIC_MASK_PTINVOKE,
     CMIC_MASK_SHIFT_DOWN, CMINVOKECOMMANDINFO, CMINVOKECOMMANDINFOEX, GCS_VERBW, IContextMenu, IContextMenu2,
-    IContextMenu3, IShellFolder, SEE_MASK_UNICODE, SHBindToParent, SHParseDisplayName,
+    IContextMenu3, IShellFolder, SEE_MASK_UNICODE, SHBindToParent, SHDoDragDrop, SHParseDisplayName,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, DestroyMenu, SW_SHOWNORMAL, TPM_RETURNCMD, TrackPopupMenuEx, WM_DRAWITEM, WM_INITMENUPOPUP,
@@ -53,7 +55,8 @@ impl Drop for Pidl {
 /// Show the context menu for `paths` (all in one directory) at screen point `pt` and run the
 /// chosen command. `extended` (Shift held) adds the extended verbs, like in Explorer.
 pub fn show(hwnd: HWND, paths: &[PathBuf], pt: POINT, extended: bool) -> Result<Option<Chosen>, String> {
-    let menu = context_menu(hwnd, paths).map_err(|e| format!("{}: {}", t("error.context_menu"), e.message()))?;
+    let menu =
+        ui_object::<IContextMenu>(hwnd, paths).map_err(|e| format!("{}: {}", t("error.context_menu"), e.message()))?;
     unsafe {
         let hmenu = CreatePopupMenu().map_err(|e| e.message())?;
         // CANRENAME: "Umbenennen" is listed; the app runs its own rename dialog for it.
@@ -100,8 +103,19 @@ pub fn show(hwnd: HWND, paths: &[PathBuf], pt: POINT, extended: bool) -> Result<
     Ok(None)
 }
 
-/// `IContextMenu` of the items, asked from their parent folder.
-fn context_menu(hwnd: HWND, paths: &[PathBuf]) -> windows::core::Result<IContextMenu> {
+/// Drag `paths` (all in one directory) out of the app with the shell's data object, so any
+/// target takes them: Explorer, mail clients, browsers. The target picks copy, move or link.
+/// Runs a modal drag loop until the drop, so it must be called outside of `AppCell::with`.
+pub fn drag_out(hwnd: HWND, paths: &[PathBuf]) -> Result<(), String> {
+    let data = ui_object::<IDataObject>(hwnd, paths).map_err(|e| e.message())?;
+    // Cancelled drags (Esc, dropped on nothing) are reported as `DRAGDROP_S_CANCEL`, not errors.
+    unsafe { SHDoDragDrop(Some(hwnd), &data, None, DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK) }
+        .map(|_| ())
+        .map_err(|e| e.message())
+}
+
+/// A UI object (`IContextMenu`, `IDataObject` …) of the items, asked from their parent folder.
+fn ui_object<T: Interface>(hwnd: HWND, paths: &[PathBuf]) -> windows::core::Result<T> {
     let pidls = paths.iter().map(|p| parse(p)).collect::<windows::core::Result<Vec<Pidl>>>()?;
     let mut folder: Option<IShellFolder> = None;
     let mut children = Vec::with_capacity(pidls.len());

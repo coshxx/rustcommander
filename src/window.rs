@@ -295,6 +295,10 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
             show_context_menu(cell, hwnd);
             LRESULT(0)
         }
+        app::WM_APP_DRAG => {
+            drag_out(cell, hwnd);
+            LRESULT(0)
+        }
         // Menu key / Shift+F10 (lParam -1). Mouse clicks are handled without DefWindowProc, so
         // they never get here.
         WM_CONTEXTMENU => {
@@ -357,6 +361,25 @@ fn show_context_menu(cell: &AppCell, hwnd: HWND) {
         Err(e) => {
             cell.with(|app| app.notify(e, app::Tone::Error));
         }
+    }
+    cell.with(|app| app.invalidate());
+}
+
+/// `WM_APP_DRAG`: drag files out of the app. The shell's drag loop runs its own message loop
+/// (which calls `wndproc` again), hence outside of `with`.
+fn drag_out(cell: &AppCell, hwnd: HWND) {
+    let Some(paths) = cell.with(|app| std::mem::take(&mut app.drag_request)) else { return };
+    if paths.is_empty() {
+        return;
+    }
+    unsafe {
+        // The left press on the row took the capture; the drag loop tracks the mouse itself.
+        if GetCapture() == hwnd {
+            let _ = ReleaseCapture();
+        }
+    }
+    if let Err(e) = shell_menu::drag_out(hwnd, &paths) {
+        cell.with(|app| app.notify(e, app::Tone::Error));
     }
     cell.with(|app| app.invalidate());
 }

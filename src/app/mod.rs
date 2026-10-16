@@ -52,6 +52,8 @@ pub const WM_APP_VIEW: u32 = WM_APP + 4;
 pub const WM_APP_CONTEXT: u32 = WM_APP + 6;
 /// Posted by the file search when there are new hits or it has ended.
 pub const WM_APP_FIND: u32 = WM_APP + 7;
+/// Posted to itself: drag the files in `App::drag_request` out of the app.
+pub const WM_APP_DRAG: u32 = WM_APP + 8;
 
 // Timer IDs (`WM_TIMER`).
 const TIMER_LOADING: usize = 1;
@@ -175,6 +177,8 @@ pub struct App {
     pub(crate) view_requests: Vec<PathBuf>,
     /// Shell context menu to open; shown by `window.rs` on `WM_APP_CONTEXT`.
     pub(crate) context_request: Option<ContextRequest>,
+    /// Items of one directory to drag out; dragged by `window.rs` on `WM_APP_DRAG`.
+    pub(crate) drag_request: Vec<PathBuf>,
     /// The last file search (kept when the dialog is closed).
     pub(crate) find: Option<find::Find>,
     /// For `--timing`: the first frame / the first frame with both panels loaded was drawn.
@@ -231,6 +235,7 @@ impl App {
             swallow_next_char: false,
             view_requests: Vec::new(),
             context_request: None,
+            drag_request: Vec::new(),
             find: None,
             painted: false,
             painted_content: false,
