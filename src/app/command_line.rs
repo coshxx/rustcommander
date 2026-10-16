@@ -66,8 +66,8 @@ impl App {
                 self.cmdline = TextInput::new(Vec::new());
                 self.history_pos = None;
             }
-            VK_UP if ctrl => self.browse_history(true),
-            VK_DOWN if ctrl => self.browse_history(false),
+            VK_UP if ctrl => self.previous_command(),
+            VK_DOWN if ctrl => self.open_history_list(),
             VK_LEFT | VK_RIGHT => {
                 self.cmdline.key(vk, ctrl, self.hwnd);
             }
@@ -116,19 +116,13 @@ impl App {
         input.insert(b' ' as u16);
     }
 
-    /// Ctrl+↑ (older) / Ctrl+↓ (newer) through the history; past the newest the line is empty.
-    fn browse_history(&mut self, older: bool) {
-        let n = self.history.len();
-        let pos = match (self.history_pos, older) {
-            (None, true) if n > 0 => Some(0),
-            (None, _) => None,
-            (Some(i), true) => Some((i + 1).min(n.saturating_sub(1))),
-            (Some(0), false) => None,
-            (Some(i), false) => Some(i - 1),
-        };
-        self.history_pos = pos;
-        let text = pos.and_then(|i| self.history.get(i)).map(|s| utf16(s)).unwrap_or_default();
-        self.cmdline = TextInput::new(text);
+    /// Ctrl+↑: the previous command into the line, again for the one before (Ctrl+↓ opens the
+    /// whole list, see `history_list.rs`).
+    fn previous_command(&mut self) {
+        let Some(last) = self.history.len().checked_sub(1) else { return };
+        let pos = self.history_pos.map_or(0, |i| (i + 1).min(last));
+        self.history_pos = Some(pos);
+        self.cmdline = TextInput::new(utf16(&self.history[pos]));
     }
 
     /// Enter / Shift+Enter: steer the panel or run the line in a console (Shift: it stays open).
@@ -146,7 +140,9 @@ impl App {
         let ok = match parse(&line) {
             Parsed::Drive(d) => self.go_to_drive(d),
             Parsed::Cd(None) => true,
-            Parsed::Cd(Some(arg)) => match parse_path(&utf16(&arg), &dir).filter(|p| p.is_dir()) {
+            // Not checked here: on an unreachable network path that would freeze the window. A
+            // failed load shows its error like any other.
+            Parsed::Cd(Some(arg)) => match parse_path(&utf16(&arg), &dir) {
                 Some(p) => {
                     self.navigate(a, p, None);
                     true
@@ -156,6 +152,13 @@ impl App {
                     false
                 }
             },
+            Parsed::Other if line.trim_start_matches('"').starts_with(r"\\") => {
+                match parse_path(&utf16(&line), &dir) {
+                    Some(p) => self.navigate(a, p, None),
+                    None => self.notify(tf("notice.no_folder", &[("path", &line)]), Tone::Error),
+                }
+                true
+            }
             Parsed::Other => match parse_path(&utf16(&line), &dir).filter(|p| p.is_dir()) {
                 Some(p) => {
                     self.navigate(a, p, None);

@@ -5,6 +5,7 @@ use std::path::Path;
 
 use crate::app::dialogs::{Dialog, DialogKind, DrivePopup, Extra};
 use crate::app::format::format_size;
+use crate::app::history_list::{HistoryList, VISIBLE};
 use crate::app::jobs::JOB_CARD_DELAY_MS;
 use crate::app::layout::{CARD_W, DIALOG_LABEL_W, ICON_W, OPTION_H, OPTIONS_ROWS_Y, ROW_H, STATUS_H};
 use crate::app::options::{LANGUAGE_ROW, ROWS, SWITCHES, is_disabled, is_on};
@@ -224,6 +225,30 @@ impl App {
             };
             c.text(&[glyph], &c.fonts.icon, rect(r.left + 10.0, r.top, 24.0, 40.0), col);
             c.text_str(&n.text, &c.fonts.name, rect(r.left + 40.0, r.top, cw - 52.0, 40.0), t.text);
+        }
+    }
+
+    pub(crate) fn draw_history_list(&self, c: &Canvas, l: &HistoryList) {
+        let t = self.theme;
+        let r = self.history_list_rect(l);
+        let shadow = rect(r.left + 2.0, r.top + 4.0, r.right - r.left, r.bottom - r.top);
+        c.fill_round(shadow, 8.0, crate::theme::rgba(0x000000, 0.35));
+        c.fill_round(r, 8.0, t.popup_bg);
+        c.stroke_round(r, 8.0, 1.0, t.popup_border);
+        let end = (l.top + VISIBLE).min(l.items.len());
+        for (row, i) in (l.top..end).enumerate() {
+            let y = r.top + 4.0 + row as f32 * ROW_H;
+            if i == l.sel {
+                c.fill_round(rect(r.left + 4.0, y, r.right - r.left - 8.0, ROW_H), 4.0, t.cursor_active);
+            }
+            c.text_str(&l.items[i], &c.fonts.name, rect(r.left + 12.0, y, r.right - r.left - 24.0, ROW_H), t.text);
+        }
+        // More than fit: a thin bar shows where the view is.
+        if l.items.len() > VISIBLE {
+            let track = r.bottom - r.top - 12.0;
+            let n = l.items.len() as f32;
+            let thumb = rect(r.right - 6.0, r.top + 6.0 + track * l.top as f32 / n, 3.0, track * VISIBLE as f32 / n);
+            c.fill_round(thumb, 1.5, t.text_dim);
         }
     }
 

@@ -38,6 +38,7 @@ thread touches.
 | `app/rename.rs` | Inline renaming (slow second click on a name). |
 | `app/packing.rs` | Pack (Alt+F5) and unpack (Alt+F9) dialogs: target, choice rows (format, level, own folder), starting the job. |
 | `app/command_line.rs` | The command line (option): keys, internal commands (`D:`, `cd`), running in a console, history. |
+| `app/history_list.rs` | The command line's history as a list (Ctrl+↓): filter, keys, mouse, deleting entries. |
 | `app/format.rs` | Pure helpers: size/date formatting, name checks, path parsing. |
 | `ui/` | Drawing only – reads `App`, never changes it. `paint()` redraws the whole window. |
 | `panel.rs` | One file list: directory, entries, cursor, scroll position, marks, quick search. |

@@ -113,13 +113,23 @@ the steady-state frame time).
   an archive: the folder holding it); the window closes when the command is done. Shift+Enter
   uses `cmd /k`, the window stays open.
 - Handled by the pane instead: `D:` (switch drive, like the drive list: see "Switching drives"
-  below; `D:\` always goes to the root), `cd <path>` (also `cd..`, `cd\`, `cd /d`, relative, `%VARS%`) and a bare path of an
-  existing folder. A missing drive or folder shows a notice and keeps the text; otherwise the line
-  is cleared.
+  below; `D:\` always goes to the root), `cd <path>` (also `cd..`, `cd\`, `cd /d`, relative,
+  `%VARS%`, `\\server\share`), a bare path of an existing folder and a bare `\\server\share…`
+  path. A missing drive or folder shows a notice and keeps the text; otherwise the line is
+  cleared. `cd` and `\\…` paths are not checked first (an unreachable server would freeze the
+  window): they are loaded in the background, a failure shows up like any failed load (the line
+  is cleared anyway, Ctrl+↑ brings it back). `\\server` alone (a list of its shares) comes later.
 - Ctrl+Enter inserts the name under the cursor, Ctrl+Shift+Enter its full path (quoted if they
   contain spaces, followed by a space).
-- History: the last 50 lines (internal commands too, a repeated one moves up), Ctrl+↑/↓ browse
-  them. Saved in `history.json` next to `config.json`: `{ "commands": [newest, …] }`.
+- History: the last 50 lines (internal commands too, a repeated one moves up). Saved in
+  `history.json` next to `config.json`: `{ "commands": [newest, …] }`.
+  - Ctrl+↑ puts the previous command into the line, again the one before it.
+  - Ctrl+↓ opens the history as a list above the line, like Total Commander: newest at the
+    bottom and selected, 10 rows visible, the rest scrolls (wheel too). With text in the line only
+    commands containing it (ignoring case). Nothing to show: a notice instead ("No history" /
+    "No matches in the history").
+  - ↑/↓, PgUp/PgDn, Home/End select; Enter or a click takes the command into the line without
+    running it; Del removes it from the history for good; Esc or a click outside closes.
 
 ### Switching drives
 

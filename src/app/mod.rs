@@ -7,6 +7,7 @@ pub(crate) mod dialogs;
 pub(crate) mod drop;
 pub(crate) mod find;
 pub(crate) mod format;
+pub(crate) mod history_list;
 pub(crate) mod jobs;
 mod keyboard;
 pub(crate) mod layout;
@@ -25,6 +26,7 @@ use windows::Win32::UI::WindowsAndMessaging::WM_APP;
 
 use crate::app::dialogs::{Dialog, DrivePopup};
 use crate::app::drop::DropHover;
+use crate::app::history_list::HistoryList;
 use crate::app::jobs::{AfterJob, RunningJob};
 use crate::app::layout::ROW_H;
 use crate::app::mouse::Drag;
@@ -95,6 +97,8 @@ pub(crate) enum Mode {
     Find,
     /// Renaming an entry in place (slow second click on its name).
     Rename(InlineRename),
+    /// The command line's history list (Ctrl+↓).
+    History(HistoryList),
 }
 
 /// Color and icon of a notice.

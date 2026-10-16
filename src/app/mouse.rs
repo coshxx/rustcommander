@@ -72,6 +72,15 @@ impl App {
             self.invalidate();
             return false;
         }
+        if let Mode::History(_) = self.mode {
+            match self.history_item_at(x, y) {
+                Some(Some(i)) if !right => self.take_history_item(i),
+                Some(_) => {}
+                None => self.mode = Mode::Normal,
+            }
+            self.invalidate();
+            return false;
+        }
         let hit = self.hit(x, y);
         if let Mode::Drives(_) = self.mode {
             match hit {
@@ -359,6 +368,11 @@ impl App {
         }
         if let Mode::Find = self.mode {
             self.find_wheel(-(delta as isize) * 3 / 120);
+            self.invalidate();
+            return;
+        }
+        if let Mode::History(_) = self.mode {
+            self.history_list_wheel(delta);
             self.invalidate();
             return;
         }

@@ -20,6 +20,7 @@ impl App {
         let shift = win::key_down(VK_SHIFT);
         let hwnd = self.hwnd;
         let handled = match &mut self.mode {
+            Mode::History(_) => self.history_list_key(vk),
             Mode::Drives(d) => {
                 match vk {
                     VK_UP => d.sel = d.sel.saturating_sub(1),
@@ -349,7 +350,7 @@ impl App {
                     i.insert(c);
                 }
             }
-            Mode::Options { .. } => {}
+            Mode::Options { .. } | Mode::History(_) => {}
             Mode::Find => self.find_char(c),
             Mode::Rename(r) => r.input.insert(c),
             Mode::Conflict(_) => {

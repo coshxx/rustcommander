@@ -65,6 +65,7 @@ impl App {
             Mode::Conflict(path) => self.draw_conflict(&c, path, w, h),
             Mode::Options { sel, popup } => self.draw_options(&c, *sel, *popup, w, h),
             Mode::Find => self.draw_find(&c, w, h, caret_x),
+            Mode::History(l) => self.draw_history_list(&c, l),
             _ => {}
         }
         self.draw_gear_tip(&c, w, h);
