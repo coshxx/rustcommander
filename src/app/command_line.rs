@@ -29,10 +29,15 @@ enum Parsed {
     Other,
 }
 
-fn parse(line: &str) -> Parsed {
+/// `D:` alone: the drive letter, upper case (the path bar takes it too).
+pub(crate) fn drive(line: &str) -> Option<char> {
     let b = line.as_bytes();
-    if b.len() == 2 && b[0].is_ascii_alphabetic() && b[1] == b':' {
-        return Parsed::Drive(b[0].to_ascii_uppercase() as char);
+    (b.len() == 2 && b[0].is_ascii_alphabetic() && b[1] == b':').then(|| b[0].to_ascii_uppercase() as char)
+}
+
+fn parse(line: &str) -> Parsed {
+    if let Some(d) = drive(line) {
+        return Parsed::Drive(d);
     }
     let lower = line.to_ascii_lowercase();
     if lower == "cd" || lower == "chdir" {
@@ -173,7 +178,7 @@ impl App {
     }
 
     /// `D:`: like the drive list (see `switch_drive`).
-    fn go_to_drive(&mut self, d: char) -> bool {
+    pub(crate) fn go_to_drive(&mut self, d: char) -> bool {
         let root = PathBuf::from(format!("{d}:\\"));
         if !root.exists() {
             self.notify(tf("notice.no_drive", &[("drive", &format!("{d}:"))]), Tone::Error);

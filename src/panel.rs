@@ -480,15 +480,16 @@ pub fn drive_letter(path: &Path) -> Option<u8> {
     }
 }
 
-/// Where switching `panel` to drive `d` goes: `None` if it is on it already; else the other
-/// panel's folder if that is on `d`, the folder last loaded there, or the root. `true` = a
-/// remembered folder (may be gone by now).
+/// Where switching `panel` to drive `d` goes: the other panel's folder if that is on `d`; else,
+/// if `panel` is on it already, `None`; else the folder last loaded there, or the root. `true` =
+/// a remembered folder (may be gone by now).
 pub fn drive_target(panel: &Panel, other: &Panel, d: u8) -> Option<(PathBuf, bool)> {
+    if drive_letter(other.folder()) == Some(d) {
+        // Like Total Commander: `C:` on C: goes to the other panel's folder.
+        return (panel.folder() != other.folder()).then(|| (other.folder().to_path_buf(), false));
+    }
     if drive_letter(panel.folder()) == Some(d) {
         return None;
-    }
-    if drive_letter(other.folder()) == Some(d) {
-        return Some((other.folder().to_path_buf(), false));
     }
     Some(match panel.drive_dirs.get(&d) {
         Some(dir) => (dir.clone(), true),
@@ -516,8 +517,11 @@ mod tests {
     fn switching_drives() {
         let mut left = at(r"D:\data");
         let right = at(r"C:\blabla\temp");
-        // Already there: stay.
+        // Already there, the other panel elsewhere: stay.
         assert_eq!(drive_target(&left, &right, b'D'), None);
+        // Already there, the other panel too: its folder, unless it is the same.
+        assert_eq!(drive_target(&at(r"C:\lala"), &right, b'C'), Some((r"C:\blabla\temp".into(), false)));
+        assert_eq!(drive_target(&right, &right, b'C'), None);
         // The other panel is on it: its folder, even over a remembered one.
         left.drive_dirs.insert(b'C', r"C:\projects".into());
         assert_eq!(drive_target(&left, &right, b'C'), Some((r"C:\blabla\temp".into(), false)));
@@ -532,5 +536,8 @@ mod tests {
         let left = at(r"D:\");
         let right = Panel { archive: Some(r"C:\dl\foo.zip".into()), ..at(r"C:\dl\foo.zip\sub") };
         assert_eq!(drive_target(&left, &right, b'C'), Some((r"C:\dl".into(), false)));
+        // Both on C:: the archive's folder, unless already there.
+        assert_eq!(drive_target(&at(r"C:\x"), &right, b'C'), Some((r"C:\dl".into(), false)));
+        assert_eq!(drive_target(&at(r"C:\dl"), &right, b'C'), None);
     }
 }

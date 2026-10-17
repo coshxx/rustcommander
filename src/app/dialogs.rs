@@ -5,6 +5,7 @@
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
+use crate::app::command_line;
 use crate::app::format::{describe, parse_path, utf16, valid_name};
 use crate::app::text_input::TextInput;
 use crate::app::{App, Mode, Tone};
@@ -128,11 +129,13 @@ impl App {
         self.mode = Mode::PathEdit { panel, input: TextInput::new(text) };
     }
 
-    /// Enter in the path bar: go to the typed path.
+    /// Enter in the path bar: go to the typed path (`D:` alone like the drive list).
     pub(crate) fn commit_path_edit(&mut self) {
-        if let Mode::PathEdit { panel, input } = std::mem::replace(&mut self.mode, Mode::Normal)
-            && let Some(p) = parse_path(&input.text, &self.panels[panel].dir)
-        {
+        let Mode::PathEdit { panel, input } = std::mem::replace(&mut self.mode, Mode::Normal) else { return };
+        if let Some(d) = command_line::drive(input.string().trim()) {
+            // `start_path_edit` made `panel` the active one.
+            self.go_to_drive(d);
+        } else if let Some(p) = parse_path(&input.text, &self.panels[panel].dir) {
             self.navigate(panel, p, None);
         }
     }

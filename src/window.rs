@@ -45,7 +45,7 @@ pub(crate) fn system_menu(hwnd: HWND) {
     }
 }
 
-/// "RustCommander 0.1.0", plus "(Debug)" in debug builds.
+/// "RustCommander 0.1.1", plus "(Debug)" in debug builds.
 fn title() -> HSTRING {
     let debug = if cfg!(debug_assertions) { " (Debug)" } else { "" };
     HSTRING::from(format!("RustCommander {}{debug}", env!("CARGO_PKG_VERSION")))
