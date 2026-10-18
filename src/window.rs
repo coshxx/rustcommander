@@ -111,7 +111,7 @@ pub(crate) fn create_window() -> HWND {
         let instance = GetModuleHandleW(None).expect("GetModuleHandleW");
         let class = WNDCLASSEXW {
             cbSize: size_of::<WNDCLASSEXW>() as u32,
-            style: CS_DBLCLKS,
+            style: CS_DBLCLKS | CS_HREDRAW | CS_VREDRAW,
             lpfnWndProc: Some(wndproc),
             hInstance: instance.into(),
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
