@@ -35,6 +35,7 @@ use crate::app::text_input::TextInput;
 use crate::config::{Config, Options, PackSettings};
 use crate::files::archive::is_archive_name;
 use crate::files::listing::{Kind, Loaded};
+use crate::files::location::Location;
 use crate::files::sort::SortKey;
 use crate::files::watch::Watcher;
 use crate::i18n::{t, tf};
@@ -74,6 +75,11 @@ pub(crate) const TIMER_LONG_PRESS: usize = 8;
 pub(crate) const TIMER_FIND: usize = 9;
 /// A slow second click on the name under the cursor starts renaming after the double-click time.
 pub(crate) const TIMER_RENAME: usize = 10;
+/// Checks for SFTP connections unused for `SFTP_IDLE`.
+const TIMER_SFTP_IDLE: usize = 11;
+
+/// SFTP connections no panel shows are closed after this long without use.
+const SFTP_IDLE: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 /// Directory change notifications trigger at most one reload per this interval.
 const REFRESH_THROTTLE_MS: u32 = 250;
@@ -209,7 +215,7 @@ impl App {
             let p = cfg.paths[i].clone().or(defaults[i].clone()).unwrap_or(PathBuf::from(r"C:\"));
             panel.sort = cfg.sorts[i];
             panel.drive_dirs = cfg.drive_dirs[i].clone();
-            panel.navigate(i, p, None, &sink);
+            panel.navigate(i, p.into(), None, &sink);
         }
         let mut timing = timing;
         let gfx = Gfx::new().expect("Direct2D/DirectWrite unavailable");
@@ -271,8 +277,11 @@ impl App {
             ..Default::default()
         };
         for i in 0..2 {
-            if !self.panels[i].dir.as_os_str().is_empty() {
-                cfg.paths[i] = Some(self.panels[i].dir.clone());
+            // A panel on a server starts in its last local folder (no connection at startup).
+            let p = &self.panels[i];
+            let dir = p.dir.local().unwrap_or(&p.last_local);
+            if !dir.as_os_str().is_empty() {
+                cfg.paths[i] = Some(dir.to_path_buf());
             }
         }
         cfg.window = crate::window::window_placement(hwnd);
@@ -280,13 +289,16 @@ impl App {
     }
 
     /// Load `path` into panel `i` and show "loading" if it takes long.
-    pub(crate) fn navigate(&mut self, i: usize, path: PathBuf, select: Option<Box<[u16]>>) {
+    pub(crate) fn navigate(&mut self, i: usize, path: Location, select: Option<Box<[u16]>>) {
+        if path.is_remote() {
+            self.arm_idle_timer();
+        }
         self.panels[i].navigate(i, path, select, &self.sink);
         win::set_timer(self.hwnd, TIMER_LOADING, LOADING_DELAY_MS + 10);
     }
 
     /// Like `navigate`, to a remembered folder: if it is gone, quietly to its nearest parent.
-    pub(crate) fn navigate_remembered(&mut self, i: usize, path: PathBuf) {
+    pub(crate) fn navigate_remembered(&mut self, i: usize, path: Location) {
         self.panels[i].navigate_remembered(i, path, &self.sink);
         win::set_timer(self.hwnd, TIMER_LOADING, LOADING_DELAY_MS + 10);
     }
@@ -316,7 +328,7 @@ impl App {
             let info = match &l.result {
                 Ok(li) => format!(
                     "  dir {} – {} entries in {:.2} ms",
-                    li.dir.display(),
+                    li.dir,
                     li.entries.len(),
                     li.elapsed.as_secs_f64() * 1000.0
                 ),
@@ -328,25 +340,26 @@ impl App {
                 Applied::Ok { dir_changed } => {
                     if dir_changed || self.panels[p].watcher.is_none() {
                         // Inside an archive, watch the directory holding it: a changed archive
-                        // file shows up there.
-                        let panel = &self.panels[p];
-                        let dir = panel.archive.as_deref().and_then(Path::parent).unwrap_or(&panel.dir);
-                        self.panels[p].watcher = Watcher::new(dir, SendHwnd::new(self.hwnd), WM_APP_DIRCHANGED, p);
+                        // file shows up there. Folders on a server aren't watched.
+                        let watched = self.panels[p].folder().map(Path::to_path_buf);
+                        self.panels[p].watcher =
+                            watched.and_then(|dir| Watcher::new(&dir, SendHwnd::new(self.hwnd), WM_APP_DIRCHANGED, p));
                     }
                     self.follow_rename(p);
                 }
                 Applied::Retry { path } => self.navigate_remembered(p, path),
                 Applied::Failed { path } => {
                     let dir = self.panels[p].dir.clone();
-                    if dir.as_os_str().is_empty() {
+                    let c = Location::Local(PathBuf::from(r"C:\"));
+                    if dir.is_empty() {
                         // Start path broken (e.g. drive gone)? Fall back to C:\.
-                        if path != Path::new(r"C:\") {
-                            self.navigate(p, PathBuf::from(r"C:\"), None);
+                        if path != c {
+                            self.navigate(p, c, None);
                         }
-                    } else if path == dir {
+                    } else if path == dir && !dir.is_remote() {
                         // The shown directory can't be read anymore (deleted?): go up.
                         if let Some(parent) = dir.parent() {
-                            self.navigate(p, parent.to_path_buf(), None);
+                            self.navigate(p, parent, None);
                         }
                     }
                 }
@@ -377,6 +390,7 @@ impl App {
             TIMER_LONG_PRESS => self.long_press(),
             TIMER_FIND => self.find_tick(),
             TIMER_RENAME => self.rename_tick(),
+            TIMER_SFTP_IDLE => self.close_idle_connections(),
             _ if TIMER_REFRESH.contains(&id) => {
                 let i = if id == TIMER_REFRESH[0] { 0 } else { 1 };
                 self.refresh_armed[i] = false;
@@ -398,12 +412,16 @@ impl App {
         let Some(e) = p.current() else { return };
         let (kind, in_archive, is_archive) = (e.kind, p.archive.is_some(), is_archive_name(&e.name));
         let path = p.dir.join(e.os_name());
-        match kind {
-            Kind::Parent => self.panels[a].go_up(a, &self.sink),
-            Kind::Dir => self.navigate(a, path, None),
-            _ if in_archive => self.extract_then(a, path, AfterJob::Open),
-            _ if is_archive && !shell => self.navigate(a, path, None),
-            _ => win::shell_open(path),
+        match (kind, path) {
+            (Kind::Parent, _) => self.panels[a].go_up(a, &self.sink),
+            (Kind::Dir, path) => self.navigate(a, path, None),
+            (_, Location::Remote(_)) if is_archive && !shell => {
+                self.notify(t("notice.remote_unsupported").into(), Tone::Info)
+            }
+            (_, path) if in_archive || path.is_remote() => self.extract_then(a, path, AfterJob::Open),
+            (_, path) if is_archive && !shell => self.navigate(a, path, None),
+            (_, Location::Local(path)) => win::shell_open(path),
+            (_, Location::Remote(_)) => {}
         }
         self.arm_loading_indicator();
     }
@@ -413,11 +431,9 @@ impl App {
         let a = self.active;
         let p = &self.panels[a];
         let Some(e) = p.current().filter(|e| e.kind != Kind::Parent && !e.is_dir()) else { return };
-        let path = p.dir.join(e.os_name());
-        if p.archive.is_some() {
-            self.extract_then(a, path, AfterJob::View);
-        } else {
-            self.request_view(path);
+        match p.dir.join(e.os_name()) {
+            Location::Local(path) if p.archive.is_none() => self.request_view(path),
+            path => self.extract_then(a, path, AfterJob::View),
         }
     }
 
@@ -430,7 +446,10 @@ impl App {
             self.notify(t("notice.read_only").into(), Tone::Info);
             return;
         }
-        let path = p.dir.join(e.os_name());
+        let Some(path) = p.dir.local().map(|d| d.join(e.os_name())) else {
+            self.notify(t("notice.remote_unsupported").into(), Tone::Info);
+            return;
+        };
         self.edit(&path);
     }
 
@@ -458,13 +477,13 @@ impl App {
     pub(crate) fn request_context_menu(&mut self, at: Option<(f32, f32)>) {
         let a = self.active;
         let p = &mut self.panels[a];
-        if p.archive.is_some() {
+        if p.archive.is_some() || p.is_remote() {
             self.notify(t("notice.no_context_menu").into(), Tone::Info);
             return;
         }
-        let mut paths = p.targets();
-        if paths.is_empty() && !p.dir.as_os_str().is_empty() {
-            paths.push(p.dir.clone());
+        let mut paths = p.local_targets();
+        if let Some(dir) = p.dir.local().filter(|d| paths.is_empty() && !d.as_os_str().is_empty()) {
+            paths.push(dir.to_path_buf());
         }
         if paths.is_empty() {
             return;
@@ -496,6 +515,22 @@ impl App {
         });
         if enterable {
             self.open_current(false);
+        }
+    }
+
+    /// Keep checking for idle SFTP connections while there are any.
+    pub(crate) fn arm_idle_timer(&self) {
+        win::set_timer(self.hwnd, TIMER_SFTP_IDLE, 60_000);
+    }
+
+    /// `TIMER_SFTP_IDLE`: close connections no panel or job uses that have been idle too long.
+    fn close_idle_connections(&mut self) {
+        let mut keep: Vec<&str> = self.panels.iter().filter_map(|p| p.dir.host()).collect();
+        if let Some(h) = self.job.as_ref().and_then(|j| j.host.as_deref()) {
+            keep.push(h);
+        }
+        if crate::sftp::close_idle(&keep, SFTP_IDLE) {
+            self.arm_idle_timer();
         }
     }
 

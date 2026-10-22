@@ -1,5 +1,6 @@
 //! File operations on a worker thread: copy, move, delete (permanent or to the recycle bin),
-//! rename, create directory, extract from an archive, pack into and unpack whole archives.
+//! rename, create directory, extract from an archive, pack into and unpack whole archives, and
+//! the same on SFTP servers (upload, download, …: `remote`).
 //! Reports progress, asks the UI about conflicts, can be cancelled.
 
 mod copy;
@@ -7,6 +8,7 @@ mod delete;
 mod extract;
 mod moving;
 pub mod pack;
+mod remote;
 #[cfg(test)]
 mod tests;
 
@@ -18,6 +20,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
+use crate::files::location::Location;
+use crate::sftp::RemotePath;
 use crate::sys::win::SendHwnd;
 
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
@@ -61,6 +65,47 @@ pub enum Job {
         dest: PathBuf,
         subdir: bool,
     },
+    /// Copy local files to a server; `into` = the target was typed with a trailing `/`.
+    Upload {
+        sources: Vec<PathBuf>,
+        dest: RemotePath,
+        into: bool,
+    },
+    /// Copy from a server (all `sources` on one host) to a local folder.
+    Download {
+        sources: Vec<RemotePath>,
+        dest: PathBuf,
+    },
+    /// Move (rename) within one server.
+    RemoteMove {
+        sources: Vec<RemotePath>,
+        dest: RemotePath,
+        into: bool,
+    },
+    /// Delete on a server, always for good.
+    RemoteDelete {
+        sources: Vec<RemotePath>,
+    },
+    RemoteRename {
+        from: RemotePath,
+        to: String,
+    },
+    RemoteMkDir {
+        path: RemotePath,
+    },
+}
+
+impl Job {
+    /// The SFTP host the job works on, if any.
+    pub fn host(&self) -> Option<&str> {
+        match self {
+            Job::Upload { dest, .. } | Job::RemoteMove { dest, .. } => Some(&dest.host),
+            Job::Download { sources, .. } | Job::RemoteDelete { sources } => sources.first().map(|s| s.host.as_str()),
+            Job::RemoteRename { from, .. } => Some(&from.host),
+            Job::RemoteMkDir { path } => Some(&path.host),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -87,8 +132,9 @@ pub struct Summary {
     pub done: u64,
     pub errors: Vec<String>,
     pub cancelled: bool,
-    /// Path the UI should put the cursor on (new name after rename/mkdir).
-    pub select: Option<PathBuf>,
+    /// Where the UI should put the cursor (new name after rename/mkdir); for "extract/download,
+    /// then open" the local file.
+    pub select: Option<Location>,
 }
 
 pub enum Event {
@@ -289,7 +335,7 @@ impl Worker {
                     match std::fs::rename(&from, &target) {
                         Ok(()) => {
                             self.summary.done = 1;
-                            self.summary.select = Some(target);
+                            self.summary.select = Some(target.into());
                         }
                         Err(e) => self.error(&from, error_text(&e)),
                     }
@@ -303,10 +349,22 @@ impl Worker {
                 match std::fs::create_dir_all(&path) {
                     Ok(()) => {
                         self.summary.done = 1;
-                        self.summary.select = Some(path);
+                        self.summary.select = Some(path.into());
                     }
                     Err(e) => self.error(&path, error_text(&e)),
                 }
+                Ok(())
+            }
+            Job::Upload { sources, dest, into } => self.upload(&sources, &dest, into),
+            Job::Download { sources, dest } => self.download(&sources, &dest),
+            Job::RemoteMove { sources, dest, into } => self.remote_move(&sources, &dest, into),
+            Job::RemoteDelete { sources } => self.remote_delete(&sources),
+            Job::RemoteRename { from, to } => {
+                self.remote_rename(&from, &to);
+                Ok(())
+            }
+            Job::RemoteMkDir { path } => {
+                self.remote_mkdir(&path);
                 Ok(())
             }
         };

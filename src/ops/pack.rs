@@ -138,7 +138,7 @@ impl Worker {
         }
         match stop {
             None => {
-                self.summary.select = Some(dest.to_path_buf());
+                self.summary.select = Some(dest.to_path_buf().into());
                 self.post_progress(true);
                 Ok(())
             }
@@ -266,7 +266,7 @@ impl Worker {
         }
         // One archive into its own folder: the cursor goes onto that folder.
         if subdir && let [t] = targets.as_slice() {
-            self.summary.select = Some(t.clone());
+            self.summary.select = Some(t.clone().into());
         }
         self.post_progress(true);
         Ok(())

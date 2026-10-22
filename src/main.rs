@@ -12,6 +12,7 @@ mod i18n;
 mod lister;
 mod ops;
 mod panel;
+mod sftp;
 mod sys;
 mod theme;
 mod timing;
@@ -32,6 +33,10 @@ use crate::window::{AppCell, create_window, show_window};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if std::env::var_os(sftp::ASKPASS_ENV).is_some() && args.len() == 1 {
+        // Started by ssh.exe to ask for a password (see `sys::askpass`).
+        std::process::exit(sys::askpass::run(&args[0]));
+    }
     let bench = args.iter().any(|a| a == "--bench");
     let timed = bench || args.iter().any(|a| a == "--timing");
     if timed {
@@ -51,6 +56,7 @@ fn main() {
     i18n::set(cfg.options.language.unwrap_or_else(i18n::detect));
     lister::set_settings(cfg.lister.clone());
     let hwnd = create_window();
+    sftp::set_owner(hwnd.0 as isize);
     timing.mark("window created");
 
     let cell = Box::into_raw(Box::new(AppCell::new(App::new(hwnd, &cfg, timing))));

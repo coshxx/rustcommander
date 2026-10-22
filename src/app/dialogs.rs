@@ -1,25 +1,37 @@
-//! Modal interactions: drive popup, path editing and the small dialogs
-//! (copy, move, delete, rename, new directory, new file, mark by mask; pack and unpack are in
-//! `packing.rs`).
+//! Modal interactions: drive popup (drives and SFTP hosts), path editing and the small dialogs
+//! (copy, move, delete, rename, new directory, new file, mark by mask, disconnect; pack and
+//! unpack are in `packing.rs`).
 
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use crate::app::command_line;
-use crate::app::format::{describe, parse_path, utf16, valid_name};
+use crate::app::format::{describe, ends_with_separator, parse_location, utf16, valid_name, valid_remote_name};
 use crate::app::text_input::TextInput;
 use crate::app::{App, Mode, Tone};
 use crate::files::listing::Kind;
+use crate::files::location::Location;
 use crate::files::mask::Mask;
 use crate::files::names::fold_case;
 use crate::i18n::{t, tf};
 use crate::ops::Job;
 use crate::panel::drive_target;
+use crate::sftp::{self, RemotePath};
 use crate::sys::win::{self, Drive};
+
+/// One row of the drive popup.
+pub(crate) enum PopupItem {
+    Drive(Drive),
+    /// An SFTP host from `~/.ssh/config` or connected right now.
+    Host {
+        name: String,
+        connected: bool,
+    },
+}
 
 pub(crate) struct DrivePopup {
     pub(crate) panel: usize,
-    pub(crate) drives: Vec<Drive>,
+    pub(crate) items: Vec<PopupItem>,
     pub(crate) sel: usize,
 }
 
@@ -44,6 +56,8 @@ pub(crate) enum DialogKind {
     Pack,
     /// Alt+F9: unpack whole archives.
     Unpack,
+    /// Disconnect from the SFTP host in `sources[0]` although a job uses it.
+    Disconnect,
 }
 
 impl DialogKind {
@@ -61,6 +75,7 @@ impl DialogKind {
             DialogKind::Select { add: false } => "dialog.unmark",
             DialogKind::Pack => "dialog.pack",
             DialogKind::Unpack => "dialog.unpack",
+            DialogKind::Disconnect => "dialog.disconnect",
         })
     }
 }
@@ -68,7 +83,7 @@ impl DialogKind {
 pub(crate) struct Dialog {
     pub(crate) kind: DialogKind,
     pub(crate) panel: usize,
-    pub(crate) sources: Vec<PathBuf>,
+    pub(crate) sources: Vec<Location>,
     pub(crate) message: String,
     pub(crate) input: Option<TextInput>,
     /// Choice rows below the input (pack and unpack dialog).
@@ -93,31 +108,119 @@ pub(crate) enum Extra {
     },
 }
 
+/// The items of one panel: all local or all on one server.
+enum Sources {
+    Local(Vec<PathBuf>),
+    Remote(Vec<RemotePath>),
+}
+
+fn split(sources: Vec<Location>) -> Sources {
+    if sources.first().is_some_and(Location::is_remote) {
+        Sources::Remote(sources.into_iter().filter_map(|l| l.remote().cloned()).collect())
+    } else {
+        Sources::Local(sources.into_iter().filter_map(|l| l.local().map(Path::to_path_buf)).collect())
+    }
+}
+
 impl App {
-    /// Open the drive popup for `panel`, preselecting its current drive.
+    /// Open the drive popup for `panel`, preselecting its current drive (or host).
     pub(crate) fn open_drives(&mut self, panel: usize) {
         self.active = panel;
-        let drives = win::drives();
-        let cur = self.panels[panel].dir.as_os_str().encode_wide().next();
-        let sel = drives.iter().position(|d| Some(fold_case(d.root[0])) == cur.map(fold_case)).unwrap_or(0);
-        self.mode = Mode::Drives(DrivePopup { panel, drives, sel });
+        let mut items: Vec<PopupItem> = win::drives().into_iter().map(PopupItem::Drive).collect();
+        let connected = sftp::connected();
+        let mut hosts = sftp::config_hosts();
+        for h in &connected {
+            if !hosts.contains(h) {
+                hosts.push(h.clone());
+            }
+        }
+        items.extend(hosts.into_iter().map(|name| {
+            let connected = connected.contains(&name);
+            PopupItem::Host { name, connected }
+        }));
+        let dir = &self.panels[panel].dir;
+        let cur = dir.local().and_then(|d| d.as_os_str().encode_wide().next());
+        let sel = items
+            .iter()
+            .position(|i| match i {
+                PopupItem::Drive(d) => Some(fold_case(d.root[0])) == cur.map(fold_case),
+                PopupItem::Host { name, .. } => dir.host() == Some(name.as_str()),
+            })
+            .unwrap_or(0);
+        self.mode = Mode::Drives(DrivePopup { panel, items, sel });
     }
 
-    /// Switch to the drive at `idx` of the popup (stays put if it is the current drive).
+    /// Switch to the drive (or host) at `idx` of the popup (stays put if it is the current drive).
     pub(crate) fn choose_drive(&mut self, idx: usize) {
-        if let Mode::Drives(d) = std::mem::replace(&mut self.mode, Mode::Normal)
-            && let Some(drive) = d.drives.get(idx)
-        {
-            self.switch_drive(d.panel, drive.root[0] as u8);
+        if let Mode::Drives(d) = std::mem::replace(&mut self.mode, Mode::Normal) {
+            match d.items.get(idx) {
+                Some(PopupItem::Drive(drive)) => self.switch_drive(d.panel, drive.root[0] as u8),
+                Some(PopupItem::Host { name, .. }) => self.open_host(d.panel, name),
+                None => {}
+            }
         }
+    }
+
+    /// Show `host` in `panel`: the folder the panel was in last there, else the home directory.
+    pub(crate) fn open_host(&mut self, panel: usize, host: &str) {
+        let p = &self.panels[panel];
+        if p.dir.host() == Some(host) {
+            return;
+        }
+        let target = p.host_dirs.get(host).cloned().unwrap_or_else(|| RemotePath::new(host, ""));
+        self.navigate(panel, Location::Remote(target), None);
+    }
+
+    /// Del (or the ✕) on a connected host in the drive popup.
+    pub(crate) fn disconnect_popup_item(&mut self, idx: usize) {
+        let Mode::Drives(d) = &self.mode else { return };
+        let Some(PopupItem::Host { name, connected: true }) = d.items.get(idx) else { return };
+        let (host, panel) = (name.clone(), d.panel);
+        if self.job.as_ref().is_some_and(|j| j.host.as_deref() == Some(host.as_str())) {
+            self.mode = Mode::Dialog(Dialog {
+                kind: DialogKind::Disconnect,
+                panel,
+                sources: vec![Location::Remote(RemotePath::new(&host, "/"))],
+                message: tf("dialog.disconnect_question", &[("host", &host)]),
+                input: None,
+                extra: Extra::None,
+                focus: 0,
+                keep_marks: true,
+            });
+            return;
+        }
+        self.disconnect(&host);
+        self.open_drives(panel);
+        if let Mode::Drives(d) = &mut self.mode {
+            d.sel = idx.min(d.items.len().saturating_sub(1));
+        }
+    }
+
+    /// Close the connection to `host` (cancelling a job that uses it); panels showing it go back
+    /// to their last local folder.
+    pub(crate) fn disconnect(&mut self, host: &str) {
+        if let Some(job) = self.job.as_ref().filter(|j| j.host.as_deref() == Some(host)) {
+            job.handle.cancel();
+        }
+        sftp::disconnect(host);
+        for i in 0..2 {
+            let on_host = self.panels[i].dir.host() == Some(host)
+                || self.panels[i].pending.as_ref().is_some_and(|p| p.path.host() == Some(host));
+            if on_host {
+                let back = self.panels[i].last_local.clone();
+                let back = if back.as_os_str().is_empty() { PathBuf::from(r"C:\") } else { back };
+                self.navigate(i, back.into(), None);
+            }
+        }
+        self.notify(tf("notice.disconnected", &[("host", &host)]), Tone::Info);
     }
 
     /// Switch `panel` to drive `d` (`b'C'`): stays if it is on it already, else goes to the other
     /// panel's folder there, the folder it was in last on that drive, or the root.
     pub(crate) fn switch_drive(&mut self, panel: usize, d: u8) {
         match drive_target(&self.panels[panel], &self.panels[panel ^ 1], d.to_ascii_uppercase()) {
-            Some((dir, true)) => self.navigate_remembered(panel, dir),
-            Some((dir, false)) => self.navigate(panel, dir, None),
+            Some((dir, true)) => self.navigate_remembered(panel, dir.into()),
+            Some((dir, false)) => self.navigate(panel, dir.into(), None),
             None => {}
         }
     }
@@ -125,7 +228,7 @@ impl App {
     /// Make the path bar of `panel` editable (Ctrl+L, click on the path).
     pub(crate) fn start_path_edit(&mut self, panel: usize) {
         self.active = panel;
-        let text = utf16(&self.panels[panel].dir.display().to_string());
+        let text = utf16(&self.panels[panel].dir.to_string());
         self.mode = Mode::PathEdit { panel, input: TextInput::new(text) };
     }
 
@@ -135,7 +238,7 @@ impl App {
         if let Some(d) = command_line::drive(input.string().trim()) {
             // `start_path_edit` made `panel` the active one.
             self.go_to_drive(d);
-        } else if let Some(p) = parse_path(&input.text, &self.panels[panel].dir) {
+        } else if let Some(p) = parse_location(&input.text, &self.panels[panel].dir) {
             self.navigate(panel, p, None);
         }
     }
@@ -147,6 +250,7 @@ impl App {
             return;
         }
         let a = self.active;
+        let remote = self.panels[a].is_remote();
         // Archives are read-only: copying out of one extracts, everything that writes is refused.
         let kind = match kind {
             DialogKind::Copy if self.panels[a].archive.is_some() => DialogKind::Extract,
@@ -160,6 +264,12 @@ impl App {
                 self.notify(t("notice.read_only").into(), Tone::Info);
                 return;
             }
+            DialogKind::NewFile if remote => {
+                self.notify(t("notice.remote_unsupported").into(), Tone::Info);
+                return;
+            }
+            // A server has no recycle bin.
+            DialogKind::Delete { .. } if remote => DialogKind::Delete { recycle: false },
             DialogKind::Pack => return self.open_pack(),
             DialogKind::Unpack => return self.open_unpack(),
             _ => kind,
@@ -189,11 +299,11 @@ impl App {
                 (vec![p.dir.join(e.os_name())], msg, Some(TextInput { text: name, caret, anchor: None }))
             }
             DialogKind::MkDir => {
-                let msg = tf("dialog.mkdir_in", &[("dir", &p.dir.display())]);
+                let msg = tf("dialog.mkdir_in", &[("dir", &p.dir)]);
                 (Vec::new(), msg, Some(TextInput::new(Vec::new())))
             }
             DialogKind::NewFile => {
-                let msg = tf("dialog.edit_in", &[("dir", &p.dir.display())]);
+                let msg = tf("dialog.edit_in", &[("dir", &p.dir)]);
                 let name = p.current().filter(|e| !e.is_dir()).map(|e| e.name.to_vec()).unwrap_or_default();
                 (Vec::new(), msg, Some(TextInput::selected(name)))
             }
@@ -201,7 +311,7 @@ impl App {
                 let msg = t("dialog.mask_hint").to_string();
                 (Vec::new(), msg, Some(TextInput::selected(utf16(&self.mask))))
             }
-            DialogKind::Pack | DialogKind::Unpack => return,
+            DialogKind::Pack | DialogKind::Unpack | DialogKind::Disconnect => return,
         };
         if sources.is_empty() && !matches!(kind, DialogKind::MkDir | DialogKind::NewFile | DialogKind::Select { .. }) {
             return;
@@ -224,53 +334,102 @@ impl App {
         let Mode::Dialog(d) = std::mem::replace(&mut self.mode, Mode::Normal) else { return };
         let dir = self.panels[d.panel].dir.clone();
         let input = d.input.as_ref().map(|i| i.string().trim().to_string()).unwrap_or_default();
-        if let DialogKind::Select { add } = d.kind {
-            self.apply_mask(d.panel, input, add);
-            return;
-        }
-        if matches!(d.kind, DialogKind::Pack | DialogKind::Unpack) {
-            self.commit_archive_dialog(d);
-            return;
-        }
-        if d.kind == DialogKind::NewFile {
-            self.new_file(d.panel, input);
-            return;
+        match d.kind {
+            DialogKind::Select { add } => return self.apply_mask(d.panel, input, add),
+            DialogKind::Pack | DialogKind::Unpack => return self.commit_archive_dialog(d),
+            DialogKind::NewFile => return self.new_file(d.panel, input),
+            DialogKind::Disconnect => {
+                if let Some(host) = d.sources.first().and_then(Location::host) {
+                    self.disconnect(host);
+                }
+                return;
+            }
+            _ => {}
         }
         let job = match d.kind {
-            DialogKind::Select { .. } | DialogKind::NewFile | DialogKind::Pack | DialogKind::Unpack => return,
+            DialogKind::Select { .. }
+            | DialogKind::NewFile
+            | DialogKind::Pack
+            | DialogKind::Unpack
+            | DialogKind::Disconnect => return,
             DialogKind::Copy | DialogKind::Extract | DialogKind::Move => {
-                let Some(dest) = parse_path(&utf16(&input), &dir) else { return };
-                if self.panels.iter().any(|p| p.archive.as_ref().is_some_and(|a| dest.starts_with(a))) {
+                let Some(dest) = parse_location(&utf16(&input), &dir) else { return };
+                let into_archive = dest.local().is_some_and(|dest| {
+                    self.panels.iter().any(|p| p.archive.as_ref().is_some_and(|a| dest.starts_with(a)))
+                });
+                if into_archive {
                     self.notify(t("notice.read_only").into(), Tone::Info);
                     return;
                 }
-                match d.kind {
-                    DialogKind::Copy => Job::Copy { sources: d.sources, dest },
-                    DialogKind::Extract => Job::Extract { sources: d.sources, dest },
-                    _ => Job::Move { sources: d.sources, dest },
+                match self.transfer_job(d.kind, d.sources, dest, ends_with_separator(&input)) {
+                    Some(job) => job,
+                    None => return,
                 }
             }
-            DialogKind::Delete { recycle } => Job::Delete { sources: d.sources, recycle },
+            DialogKind::Delete { recycle } => match split(d.sources) {
+                Sources::Local(sources) => Job::Delete { sources, recycle },
+                Sources::Remote(sources) => Job::RemoteDelete { sources },
+            },
             DialogKind::Rename => {
                 let from = d.sources[0].clone();
-                if from.file_name().is_some_and(|n| n == input.as_str()) {
+                if from.file_name().as_deref() == Some(input.as_str()) {
                     return;
                 }
-                if !valid_name(&input, false) {
+                let ok = if from.is_remote() { valid_remote_name(&input, false) } else { valid_name(&input, false) };
+                if !ok {
                     self.notify(tf("notice.invalid_name", &[("name", &input)]), Tone::Error);
                     return;
                 }
-                Job::Rename { from, to: input.into() }
+                match from {
+                    Location::Local(from) => Job::Rename { from, to: input.into() },
+                    Location::Remote(from) => Job::RemoteRename { from, to: input },
+                }
             }
             DialogKind::MkDir => {
-                if !valid_name(&input, true) {
+                let ok = if dir.is_remote() { valid_remote_name(&input, true) } else { valid_name(&input, true) };
+                if !ok {
                     self.notify(tf("notice.invalid_name", &[("name", &input)]), Tone::Error);
                     return;
                 }
-                Job::MkDir { path: dir.join(&input) }
+                match &dir {
+                    Location::Local(dir) => Job::MkDir { path: dir.join(&input) },
+                    Location::Remote(dir) => Job::RemoteMkDir { path: dir.resolve(&input) },
+                }
             }
         };
         self.start_job(job, d.kind.title(), (!d.keep_marks).then_some(d.panel));
+    }
+
+    /// The job for copying / extracting / moving `sources` to `dest`; `None` (with a notice) for
+    /// combinations that don't work (yet). `into` = the target was typed with a trailing `\`/`/`.
+    fn transfer_job(&mut self, kind: DialogKind, sources: Vec<Location>, dest: Location, into: bool) -> Option<Job> {
+        let refuse = |app: &mut App, key: &str| {
+            app.notify(t(key).into(), Tone::Info);
+            None
+        };
+        match (split(sources), dest) {
+            (Sources::Local(sources), Location::Local(dest)) => Some(match kind {
+                DialogKind::Copy => Job::Copy { sources, dest },
+                DialogKind::Extract => Job::Extract { sources, dest },
+                _ => Job::Move { sources, dest },
+            }),
+            (Sources::Local(sources), Location::Remote(dest)) => match kind {
+                DialogKind::Copy => Some(Job::Upload { sources, dest, into }),
+                DialogKind::Move => refuse(self, "notice.move_between"),
+                _ => refuse(self, "notice.remote_unsupported"),
+            },
+            (Sources::Remote(sources), Location::Local(dest)) => match kind {
+                DialogKind::Move => refuse(self, "notice.move_between"),
+                _ => Some(Job::Download { sources, dest }),
+            },
+            (Sources::Remote(sources), Location::Remote(dest)) => {
+                let same_host = sources.iter().all(|s| s.host == dest.host);
+                match kind {
+                    DialogKind::Move if same_host => Some(Job::RemoteMove { sources, dest, into }),
+                    _ => refuse(self, "notice.remote_to_remote"),
+                }
+            }
+        }
     }
 
     /// Shift+F4: create `name` in the panel's directory if it doesn't exist, put the cursor on it
@@ -280,7 +439,7 @@ impl App {
             self.notify(tf("notice.invalid_name", &[("name", &name)]), Tone::Error);
             return;
         }
-        let dir = self.panels[panel].dir.clone();
+        let Some(dir) = self.panels[panel].dir.local().map(Path::to_path_buf) else { return };
         let path = dir.join(&name);
         if !path.exists()
             && let Err(e) = std::fs::OpenOptions::new().write(true).create_new(true).open(&path)
@@ -292,7 +451,7 @@ impl App {
             self.notify(tf("notice.is_folder", &[("name", &name)]), Tone::Error);
             return;
         }
-        self.navigate(panel, dir, Some(utf16(&name).into()));
+        self.navigate(panel, dir.into(), Some(utf16(&name).into()));
         self.edit(&path);
     }
 
@@ -309,12 +468,13 @@ impl App {
     }
 }
 
-/// Message and prefilled target (`dest` with a trailing backslash) of a copy, extract or move
+/// Message and prefilled target (`dest` with a trailing separator) of a copy, extract or move
 /// dialog.
-pub(crate) fn transfer_prompt(kind: DialogKind, sources: &[PathBuf], dest: &Path) -> (String, TextInput) {
-    let mut dest = dest.display().to_string();
-    if !dest.ends_with('\\') {
-        dest.push('\\');
+pub(crate) fn transfer_prompt(kind: DialogKind, sources: &[Location], dest: &Location) -> (String, TextInput) {
+    let sep = if dest.is_remote() { '/' } else { '\\' };
+    let mut dest = dest.to_string();
+    if !dest.ends_with(sep) {
+        dest.push(sep);
     }
     let key = match kind {
         DialogKind::Copy => "dialog.copy_to",

@@ -42,10 +42,11 @@ thread touches.
 | `app/format.rs` | Pure helpers: size/date formatting, name checks, path parsing. |
 | `ui/` | Drawing only – reads `App`, never changes it. `paint()` redraws the whole window. |
 | `panel.rs` | One file list: directory, entries, cursor, scroll position, marks, quick search. |
-| `files/` | Files, but not operations on them: listing directories (`listing`), file search (`find`), folder sizes and the shared directory reader `scan` (`dirsize`), sort order (`sort`, pure and tested), archives as read-only directories (`archive`), UTF-16 names and natural sort (`names`), marking masks (`mask`), change notifications (`watch`), temp files for opening entries of archives (`temp`). |
-| `ops/` | File operations on a worker thread: `copy`, `moving`, `delete`, `extract` (from archives), `pack` (into a new zip/7z, unpacking whole archives); `mod.rs` holds the public API (`Job`, `Handle`, `Event`) and the shared worker logic. |
+| `files/` | Files, but not operations on them: listing directories (`listing`), file search (`find`), folder sizes and the shared directory reader `scan` (`dirsize`), sort order (`sort`, pure and tested), archives as read-only directories (`archive`), where a panel is (`location`: local or SFTP), UTF-16 names and natural sort (`names`), marking masks (`mask`), change notifications (`watch`), temp files for opening entries of archives and server files (`temp`). |
+| `sftp/` | SFTP over Windows' `ssh.exe`: the protocol (`proto`, pure and tested), one connection (`session`: the ssh process, request/reply routing, pipelined transfers), remote paths (`path`), and in `mod.rs` the connection pool, listing remote folders and the hosts of `~/.ssh/config`. |
+| `ops/` | File operations on a worker thread: `copy`, `moving`, `delete`, `extract` (from archives), `pack` (into a new zip/7z, unpacking whole archives), `remote` (upload, download and operations on an SFTP server); `mod.rs` holds the public API (`Job`, `Handle`, `Event`) and the shared worker logic. |
 | `lister/` | The F3 viewer: its own windows (`window`), state and commands (`mod.rs`), input, drawing, the byte → screen line logic (`text`, pure and tested) and the search (`search`). |
-| `sys/` | Thin safe wrappers around Win32 (`win`), Direct2D/DirectWrite (`gfx`), libarchive from Windows' `archiveint.dll` (`libarchive`), memory-mapped files (`mapped`), the shell context menu and dragging out (`shell_menu`) and the window as an OLE drop target (`drop_target`). |
+| `sys/` | Thin safe wrappers around Win32 (`win`), Direct2D/DirectWrite (`gfx`), libarchive from Windows' `archiveint.dll` (`libarchive`), memory-mapped files (`mapped`), the shell context menu and dragging out (`shell_menu`), the window as an OLE drop target (`drop_target`) and the SFTP password window (`askpass`). |
 | `config/` | Settings file `config.json` (`mod.rs`, incl. `Options`), the command line history `history.json` (`history`) and a minimal JSON parser/writer (`json`). |
 | `i18n.rs`, `../i18n/*.json` | Translations: current language, `t` / `tf` / `tn` lookups; texts embedded from the JSON files. |
 | `theme.rs`, `timing.rs` | Colors, `--timing` measurements. |
@@ -65,6 +66,7 @@ thread touches.
 | Shell open | `win::shell_open` | – | – |
 | Temp cleanup (once) | `main` (`files::temp::sweep_old`) | – | – |
 | Lister search (one per search) | `Lister::search` → `search::start` | `WM_APP_SEARCH` (to the lister window) + channel | `Lister::on_search_event` |
+| SFTP reply reader + ssh stderr reader (two per connection) | `sftp::Session::connect` | replies go to the waiting request's channel | whoever sent the request (loader / worker thread) |
 
 Data always travels through an `mpsc` channel; the posted message only wakes the UI thread.
 A loader result that arrives after a newer load was started is dropped (`Applied::Stale`).
@@ -86,6 +88,22 @@ anything that could leave the destination. Alt+F9 unpacks whole archives the sam
 (`ops/pack.rs`, `Job::Unpack`). Alt+F5 writes a new archive through `sys::libarchive::Writer`
 (`Job::Pack`): one header per folder and file, the data streamed in 256 KB blocks; on cancel or a
 write error the writer is marked failed (no trailer is written) and the file deleted.
+
+## SFTP
+
+A panel's folder is a `files::location::Location`: `Local(PathBuf)` (archives included) or
+`Remote(RemotePath)` (`sftp://host/path`). Code that needs the local file system asks for
+`local()` and gets `None` on a server, so a remote path never reaches `std::fs`; features that
+don't work remotely show a notice. `files::listing::load` hands remote paths to `sftp::load`,
+operations become `Job::Upload`, `Download`, `RemoteMove`, … (`ops/remote.rs`).
+
+`sftp::session(host)` returns the shared connection, connecting first if needed (blocking, so
+only loader and worker threads call it). A connection is `ssh.exe -s host sftp` with piped
+stdio; a reader thread routes each reply to the channel of the request with its id, so several
+threads can use one connection and transfers keep 64 requests in flight. Passwords: ssh.exe
+starts `SSH_ASKPASS` = our own exe with `RC_ASKPASS=1` set, and `main` then runs only
+`sys::askpass` (a small Direct2D window) and prints the answer. The UI thread closes idle
+connections on a one-minute timer (`TIMER_SFTP_IDLE`).
 
 ## Lister windows
 

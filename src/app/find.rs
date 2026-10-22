@@ -10,10 +10,10 @@ use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use crate::app::format::{parse_path, utf16};
 use crate::app::layout::ROW_H;
 use crate::app::text_input::TextInput;
-use crate::app::{App, Mode, TIMER_FIND, WM_APP_FIND};
+use crate::app::{App, Mode, TIMER_FIND, Tone, WM_APP_FIND};
 use crate::files::find::{self, Hit, Query, Search};
 use crate::files::names::natural_cmp;
-use crate::i18n::tf;
+use crate::i18n::{t, tf};
 use crate::sys::win::{self, SendHwnd};
 
 /// Translation keys of the input fields' labels, in order.
@@ -127,8 +127,11 @@ impl App {
         match &mut self.find {
             Some(f) => f.focus = if f.hits.is_empty() { 0 } else { LIST },
             None => {
-                // Inside an archive: search the folder holding it.
-                let dir = p.archive.as_deref().and_then(Path::parent).unwrap_or(&p.dir);
+                // Inside an archive: search the folder holding it. Not on a server.
+                let Some(dir) = p.folder() else {
+                    self.notify(t("notice.remote_unsupported").into(), Tone::Info);
+                    return;
+                };
                 self.find = Some(Find::new(dir));
             }
         }
@@ -137,7 +140,8 @@ impl App {
 
     /// Enter in an input: start a new search (a running one is dropped).
     fn start_find(&mut self) {
-        let base = self.panels[self.active].dir.clone();
+        let p = &self.panels[self.active];
+        let base = p.dir.local().unwrap_or(&p.last_local).to_path_buf();
         let Some(f) = &mut self.find else { return };
         f.running = None;
         f.hits.clear();
@@ -191,7 +195,7 @@ impl App {
         let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else { return };
         self.mode = Mode::Normal;
         let select: Box<[u16]> = name.encode_wide().collect();
-        self.navigate(self.active, dir.to_path_buf(), Some(select));
+        self.navigate(self.active, dir.to_path_buf().into(), Some(select));
     }
 
     /// F3: view the selected hit (files only).

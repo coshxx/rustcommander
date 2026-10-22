@@ -1,6 +1,6 @@
 //! Where things are on screen: sizes in DIPs, panel geometry and hit-testing.
 
-use crate::app::dialogs::Dialog;
+use crate::app::dialogs::{Dialog, PopupItem};
 use crate::app::format::utf16;
 use crate::app::{App, Mode};
 use crate::files::sort::SortKey;
@@ -21,7 +21,9 @@ pub(crate) const DATE_W: f32 = 118.0;
 pub(crate) const PAD: f32 = 12.0;
 pub(crate) const ICON_W: f32 = 24.0;
 pub(crate) const CHIP_W: f32 = 40.0;
-const POPUP_W: f32 = 230.0;
+const POPUP_W: f32 = 260.0;
+/// The ✕ (disconnect) at the right end of a connected host in the drive popup.
+pub(crate) const POPUP_CLOSE_W: f32 = 28.0;
 /// Options dialog: width, height of one option row, rows start this far below the top.
 const OPTIONS_W: f32 = 460.0;
 pub(crate) const OPTION_H: f32 = 32.0;
@@ -128,7 +130,7 @@ impl App {
 
     /// The command line prompt: the active panel's path and `>`.
     pub(crate) fn prompt(&self) -> String {
-        format!("{}>", self.panels[self.active].shown_path().display())
+        format!("{}>", self.panels[self.active].shown_path())
     }
 
     /// The command line: (whole bar, prompt, input box).
@@ -159,7 +161,7 @@ impl App {
         let (w, h) = self.gfx.size_dips(self.hwnd);
         if let Mode::Drives(d) = &self.mode {
             let (px, _) = self.panel_x(d.panel, w);
-            let r = self.popup_rect(px, d.drives.len());
+            let r = self.popup_rect(px, d.items.len());
             if x >= r.left && x < r.right && y >= r.top + 4.0 && y < r.bottom - 4.0 {
                 return Hit::Popup(((y - r.top - 4.0) / ROW_H) as usize);
             }
@@ -335,5 +337,16 @@ impl App {
     /// Drive popup below the drive chip of a panel at `px`.
     pub(crate) fn popup_rect(&self, px: f32, n: usize) -> Rect {
         rect(px + PAD - 4.0, PATH_H - 2.0, POPUP_W, n as f32 * ROW_H + 8.0)
+    }
+
+    /// Whether `x` is on the ✕ of popup row `i` (a connected host).
+    pub(crate) fn on_popup_close(&self, i: usize, x: f32) -> bool {
+        let Mode::Drives(d) = &self.mode else { return false };
+        if !matches!(d.items.get(i), Some(PopupItem::Host { connected: true, .. })) {
+            return false;
+        }
+        let (w, _) = self.gfx.size_dips(self.hwnd);
+        let r = self.popup_rect(self.panel_x(d.panel, w).0, d.items.len());
+        x >= r.right - POPUP_CLOSE_W - 4.0
     }
 }

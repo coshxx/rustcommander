@@ -117,7 +117,7 @@ impl Worker {
             && w.found
             && !w.failed
         {
-            self.summary.select = Some(w.target.clone());
+            self.summary.select = Some(w.target.clone().into());
         }
         self.post_progress(true);
         Ok(())

@@ -1,7 +1,7 @@
 //! Alt+F5 (pack into a zip/7z archive) and Alt+F9 (unpack whole archives): their dialogs, which
 //! have a row of choices below the target input, and starting the job.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 
@@ -11,6 +11,7 @@ use crate::app::text_input::TextInput;
 use crate::app::{App, Mode, Tone};
 use crate::config::PackSettings;
 use crate::files::archive::is_archive_name;
+use crate::files::location::Location;
 use crate::i18n::{t, tf};
 use crate::ops::Job;
 use crate::ops::pack::{Format, Level};
@@ -30,8 +31,11 @@ impl App {
     /// Where a dialog writes to by default: the other panel's folder, or this one if the other
     /// shows an archive.
     fn default_target_dir(&self) -> PathBuf {
-        let other = &self.panels[self.active ^ 1];
-        if other.archive.is_none() { other.dir.clone() } else { self.panels[self.active].dir.clone() }
+        let (this, other) = (&self.panels[self.active], &self.panels[self.active ^ 1]);
+        match other.dir.local().filter(|_| other.archive.is_none()) {
+            Some(dir) => dir.to_path_buf(),
+            None => this.dir.local().unwrap_or(&this.last_local).to_path_buf(),
+        }
     }
 
     /// Alt+F5: pack the marked entries (or the one under the cursor).
@@ -46,16 +50,21 @@ impl App {
             self.notify(t("notice.pack_in_archive").into(), Tone::Info);
             return;
         }
-        let sources = p.targets();
+        if p.is_remote() {
+            self.notify(t("notice.remote_unsupported").into(), Tone::Info);
+            return;
+        }
+        let sources = p.local_targets();
         let name = match sources.as_slice() {
             [] => return,
             [one] if one.is_dir() => one.file_name().map(|n| n.to_string_lossy().into_owned()),
             [one] => one.file_stem().map(|n| n.to_string_lossy().into_owned()),
-            _ => p.dir.file_name().map(|n| n.to_string_lossy().into_owned()),
+            _ => p.dir.file_name(),
         }
         .unwrap_or_else(|| "archive".into());
         let format = self.pack.format;
         let dest = self.default_target_dir().join(format!("{name}.{}", format.id()));
+        let sources: Vec<Location> = sources.into_iter().map(Location::Local).collect();
         let message = tf("dialog.pack_to", &[("what", &describe(&sources))]);
         let input = Some(TextInput::new(utf16(&dest.display().to_string())));
         let extra = Extra::Pack { format, level: self.pack.level };
@@ -84,13 +93,17 @@ impl App {
             self.notify(t("notice.unpack_in_archive").into(), Tone::Info);
             return;
         }
-        let targets = p.targets();
+        if p.is_remote() {
+            self.notify(t("notice.remote_unsupported").into(), Tone::Info);
+            return;
+        }
+        let targets = p.local_targets();
         if targets.is_empty() {
             return;
         }
         let is_archive =
             |s: &&PathBuf| s.is_file() && s.file_name().is_some_and(|n| is_archive_name(&utf16(&n.to_string_lossy())));
-        let sources: Vec<PathBuf> = targets.iter().filter(is_archive).cloned().collect();
+        let sources: Vec<Location> = targets.iter().filter(is_archive).cloned().map(Location::Local).collect();
         if sources.is_empty() {
             self.notify(t("notice.no_archives").into(), Tone::Info);
             return;
@@ -167,9 +180,11 @@ impl App {
 
     /// Enter in the pack or unpack dialog: remember the choices and start the job.
     pub(crate) fn commit_archive_dialog(&mut self, d: Dialog) {
-        let dir = self.panels[d.panel].dir.clone();
+        let p = &self.panels[d.panel];
+        let dir = p.dir.local().unwrap_or(&p.last_local).to_path_buf();
         let input = d.input.as_ref().map(|i| i.string().trim().to_string()).unwrap_or_default();
         let Some(dest) = parse_path(&utf16(&input), &dir) else { return };
+        let sources: Vec<PathBuf> = d.sources.iter().filter_map(|l| l.local().map(Path::to_path_buf)).collect();
         if self.panels.iter().any(|p| p.archive.as_ref().is_some_and(|a| dest.starts_with(a))) {
             self.notify(t("notice.read_only").into(), Tone::Info);
             return;
@@ -181,11 +196,11 @@ impl App {
                     return;
                 }
                 self.pack = PackSettings { format, level, ..self.pack };
-                Job::Pack { sources: d.sources, dest, format, level }
+                Job::Pack { sources, dest, format, level }
             }
             Extra::Unpack { subdir } => {
                 self.pack.subdir = subdir;
-                Job::Unpack { archives: d.sources, dest, subdir }
+                Job::Unpack { archives: sources, dest, subdir }
             }
             Extra::None => return,
         };

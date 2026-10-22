@@ -4,7 +4,9 @@
     "cancel": "Abbrechen",
     "close": "Schließen",
     "folder": "Ordner",
-    "esc_cancels": "Esc bricht ab"
+    "esc_cancels": "Esc bricht ab",
+    "yes": "Ja",
+    "no": "Nein"
   },
   "keybar": {
     "tab": { "key": "Tab", "label": "Seite" },
@@ -76,7 +78,9 @@
     "next_field": "Nächstes Feld",
     "quoted": "„{name}“",
     "items_one": "{n} Element",
-    "items_other": "{n} Elemente"
+    "items_other": "{n} Elemente",
+    "disconnect": "Verbindung trennen",
+    "disconnect_question": "Ein Job nutzt {host} noch. Abbrechen und trennen?"
   },
   "pack": {
     "store": "Speichern",
@@ -120,7 +124,11 @@
     "unpack_in_archive": "Im Archiv entpackt F5",
     "no_archives": "Keine Archive ausgewählt",
     "no_history": "Kein Verlauf",
-    "no_history_matches": "Keine Treffer im Verlauf"
+    "no_history_matches": "Keine Treffer im Verlauf",
+    "remote_unsupported": "Auf SFTP-Servern noch nicht möglich",
+    "move_between": "Verschieben zwischen lokal und SFTP geht noch nicht – erst kopieren, dann löschen",
+    "remote_to_remote": "Kopieren zwischen SFTP-Ordnern geht noch nicht",
+    "disconnected": "Verbindung zu {host} getrennt"
   },
   "options": {
     "title": "Optionen",
@@ -188,6 +196,16 @@
     "is_folder": "ist ein Ordner",
     "context_menu": "Kontextmenü nicht verfügbar",
     "invalid_source": "ungültiger Quellpfad",
-    "file_changed": "Datei hat sich beim Lesen geändert"
+    "file_changed": "Datei hat sich beim Lesen geändert",
+    "same_path": "Quelle und Ziel sind identisch",
+    "into_itself": "Ziel liegt innerhalb der Quelle"
+  },
+  "askpass": {
+    "title": "SSH",
+    "password": "Passwort",
+    "host_key": "Unbekannter Host-Schlüssel"
+  },
+  "sftp": {
+    "lost": "Verbindung unterbrochen"
   }
 }

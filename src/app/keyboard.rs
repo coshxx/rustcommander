@@ -2,7 +2,7 @@
 
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 
-use crate::app::dialogs::DialogKind;
+use crate::app::dialogs::{DialogKind, PopupItem};
 use crate::app::{App, Mode};
 use crate::files::names::fold_case;
 use crate::files::sort::SortKey;
@@ -24,10 +24,14 @@ impl App {
             Mode::Drives(d) => {
                 match vk {
                     VK_UP => d.sel = d.sel.saturating_sub(1),
-                    VK_DOWN => d.sel = (d.sel + 1).min(d.drives.len().saturating_sub(1)),
+                    VK_DOWN => d.sel = (d.sel + 1).min(d.items.len().saturating_sub(1)),
                     VK_RETURN => {
                         let s = d.sel;
                         self.choose_drive(s);
+                    }
+                    VK_DELETE => {
+                        let s = d.sel;
+                        self.disconnect_popup_item(s);
                     }
                     VK_ESCAPE => self.mode = Mode::Normal,
                     _ => return false,
@@ -339,7 +343,10 @@ impl App {
         }
         match &mut self.mode {
             Mode::Drives(d) => {
-                let hit = d.drives.iter().position(|dr| fold_case(dr.root[0]) == fold_case(c));
+                let hit = d.items.iter().position(|i| match i {
+                    PopupItem::Drive(dr) => fold_case(dr.root[0]) == fold_case(c),
+                    PopupItem::Host { .. } => false,
+                });
                 if let Some(i) = hit {
                     self.choose_drive(i);
                 }

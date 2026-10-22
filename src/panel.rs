@@ -10,9 +10,11 @@ use std::time::Instant;
 use crate::files::archive;
 use crate::files::dirsize::{self, DirSize};
 use crate::files::listing::{self, Entry, Kind, Listing, Loaded, Pending};
-use crate::files::names::{starts_with_ignore_case, to_utf16_nul};
+use crate::files::location::Location;
+use crate::files::names::starts_with_ignore_case;
 use crate::files::sort::{self, Sort};
 use crate::files::watch::Watcher;
+use crate::sftp::RemotePath;
 use crate::sys::win::SendHwnd;
 
 pub const WM_APP_LOADED: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 1;
@@ -30,7 +32,7 @@ pub struct LoadSink {
 
 #[derive(Default)]
 pub struct Panel {
-    pub dir: PathBuf,
+    pub dir: Location,
     pub entries: Vec<Entry>,
     pub cursor: usize,
     pub top: usize,
@@ -53,6 +55,10 @@ pub struct Panel {
     pub sort: Sort,
     /// The last folder loaded on each drive (`b'C'` …), for switching drives (see `drive_target`).
     pub drive_dirs: BTreeMap<u8, PathBuf>,
+    /// The last local folder (where the panel goes when its server is disconnected).
+    pub last_local: PathBuf,
+    /// The last folder per SFTP host, for choosing the host in the drive popup again.
+    pub host_dirs: HashMap<String, RemotePath>,
 }
 
 /// Outcome of `Panel::apply`.
@@ -63,22 +69,28 @@ pub enum Applied {
         dir_changed: bool,
     },
     Failed {
-        path: PathBuf,
+        path: Location,
     },
     /// A remembered folder is gone: try its parent (see `Panel::navigate_remembered`).
     Retry {
-        path: PathBuf,
+        path: Location,
     },
 }
 
 impl Panel {
-    /// The folder shown, or inside an archive the folder holding it.
-    pub fn folder(&self) -> &Path {
-        self.archive.as_deref().and_then(Path::parent).unwrap_or(&self.dir)
+    /// The local folder shown, or inside an archive the folder holding it; `None` on a server.
+    pub fn folder(&self) -> Option<&Path> {
+        let dir = self.dir.local()?;
+        Some(self.archive.as_deref().and_then(Path::parent).unwrap_or(dir))
+    }
+
+    /// The folder shown is on an SFTP server.
+    pub fn is_remote(&self) -> bool {
+        self.dir.is_remote()
     }
 
     /// Load `path` in the background; `select` = entry to put the cursor on.
-    pub fn navigate(&mut self, index: usize, path: PathBuf, select: Option<Box<[u16]>>, sink: &LoadSink) {
+    pub fn navigate(&mut self, index: usize, path: Location, select: Option<Box<[u16]>>, sink: &LoadSink) {
         if path != self.dir {
             self.clear_sizes();
         }
@@ -86,7 +98,7 @@ impl Panel {
     }
 
     /// Like `navigate`, to a remembered folder: if it can't be read, its parents are tried.
-    pub fn navigate_remembered(&mut self, index: usize, path: PathBuf, sink: &LoadSink) {
+    pub fn navigate_remembered(&mut self, index: usize, path: Location, sink: &LoadSink) {
         if path != self.dir {
             self.clear_sizes();
         }
@@ -96,7 +108,7 @@ impl Panel {
     fn start_load(
         &mut self,
         index: usize,
-        path: PathBuf,
+        path: Location,
         select: Option<Box<[u16]>>,
         keep_cursor: bool,
         walk_up: bool,
@@ -131,7 +143,7 @@ impl Panel {
 
     /// Reload the current directory, keeping cursor, scroll position and marks.
     pub fn reload(&mut self, index: usize, sink: &LoadSink) {
-        if self.dir.as_os_str().is_empty() {
+        if self.dir.is_empty() {
             return;
         }
         let search = std::mem::take(&mut self.search);
@@ -142,18 +154,16 @@ impl Panel {
     /// Parent directory, with the cursor on the directory we came from.
     pub fn go_up(&mut self, index: usize, sink: &LoadSink) {
         if let (Some(parent), Some(name)) = (self.dir.parent(), self.dir.file_name()) {
-            let sel = to_utf16_nul(name);
-            let sel = sel[..sel.len() - 1].into();
-            self.navigate(index, parent.to_path_buf(), Some(sel), sink);
+            let sel = name.encode_utf16().collect();
+            self.navigate(index, parent, Some(sel), sink);
         }
     }
 
-    /// Root of the current drive.
+    /// Root of the current drive (on a server: `/`).
     pub fn go_root(&mut self, index: usize, sink: &LoadSink) {
-        if let Some(root) = self.dir.ancestors().last()
-            && root != self.dir
-        {
-            self.navigate(index, root.to_path_buf(), None, sink);
+        let root = self.dir.root();
+        if root != self.dir {
+            self.navigate(index, root, None, sink);
         }
     }
 
@@ -181,9 +191,17 @@ impl Panel {
                 self.bytes = l.bytes;
                 self.archive = l.archive;
                 self.error = None;
-                let folder = self.folder().to_path_buf();
-                if let Some(d) = drive_letter(&folder) {
-                    self.drive_dirs.insert(d, folder);
+                match &self.dir {
+                    Location::Remote(r) => {
+                        self.host_dirs.insert(r.host.clone(), r.clone());
+                    }
+                    Location::Local(_) => {
+                        let folder = self.folder().unwrap_or(Path::new("")).to_path_buf();
+                        if let Some(d) = drive_letter(&folder) {
+                            self.drive_dirs.insert(d, folder.clone());
+                        }
+                        self.last_local = folder;
+                    }
                 }
                 if same_dir {
                     let names: HashSet<&[u16]> = self.entries.iter().filter(|e| e.is_dir()).map(|e| &*e.name).collect();
@@ -225,9 +243,9 @@ impl Panel {
                 if p.walk_up
                     && let Some(parent) = p.path.parent()
                 {
-                    return Applied::Retry { path: parent.to_path_buf() };
+                    return Applied::Retry { path: parent };
                 }
-                self.error = Some(format!("{}: {}", p.path.display(), e.trim()));
+                self.error = Some(format!("{}: {}", p.path, e.trim()));
                 Applied::Failed { path: p.path }
             }
         }
@@ -325,7 +343,8 @@ impl Panel {
         if self.sizes.contains_key(&e.name) {
             return false;
         }
-        let path = self.dir.join(e.os_name());
+        let Some(dir) = self.dir.local() else { return false };
+        let path = dir.join(e.os_name());
         let notify = (sink.hwnd, WM_APP_SIZE);
         let size = match self.archive.as_ref().and_then(|_| archive::split(&path)) {
             Some((file, inner)) => dirsize::start_in_archive(file, inner, notify),
@@ -367,8 +386,8 @@ impl Panel {
     }
 
     /// What an operation acts on: the marked entries, or else the entry under the cursor.
-    pub fn targets(&self) -> Vec<PathBuf> {
-        let marked: Vec<PathBuf> =
+    pub fn targets(&self) -> Vec<Location> {
+        let marked: Vec<Location> =
             self.entries.iter().filter(|e| e.marked).map(|e| self.dir.join(e.os_name())).collect();
         if !marked.is_empty() {
             return marked;
@@ -377,6 +396,16 @@ impl Panel {
             Some(e) if e.kind != Kind::Parent => vec![self.dir.join(e.os_name())],
             _ => Vec::new(),
         }
+    }
+
+    /// `targets` of a local panel; empty on a server.
+    pub fn local_targets(&self) -> Vec<PathBuf> {
+        self.targets().into_iter().filter_map(|l| l.local().map(Path::to_path_buf)).collect()
+    }
+
+    /// The local path of entry `e`; `None` on a server.
+    pub fn local_path(&self, e: &Entry) -> Option<PathBuf> {
+        self.dir.local().map(|d| d.join(e.os_name()))
     }
 
     /// Entry under the cursor.
@@ -464,7 +493,7 @@ impl Panel {
     }
 
     /// The path to show in the path bar: the one being loaded, else the current one.
-    pub fn shown_path(&self) -> &Path {
+    pub fn shown_path(&self) -> &Location {
         match &self.pending {
             Some(p) if p.started.elapsed().as_millis() >= crate::app::LOADING_DELAY_MS as u128 => &p.path,
             _ => &self.dir,
@@ -484,11 +513,11 @@ pub fn drive_letter(path: &Path) -> Option<u8> {
 /// if `panel` is on it already, `None`; else the folder last loaded there, or the root. `true` =
 /// a remembered folder (may be gone by now).
 pub fn drive_target(panel: &Panel, other: &Panel, d: u8) -> Option<(PathBuf, bool)> {
-    if drive_letter(other.folder()) == Some(d) {
+    if let Some(theirs) = other.folder().filter(|f| drive_letter(f) == Some(d)) {
         // Like Total Commander: `C:` on C: goes to the other panel's folder.
-        return (panel.folder() != other.folder()).then(|| (other.folder().to_path_buf(), false));
+        return (panel.folder() != Some(theirs)).then(|| (theirs.to_path_buf(), false));
     }
-    if drive_letter(panel.folder()) == Some(d) {
+    if panel.folder().and_then(drive_letter) == Some(d) {
         return None;
     }
     Some(match panel.drive_dirs.get(&d) {
@@ -502,7 +531,7 @@ mod tests {
     use super::*;
 
     fn at(dir: &str) -> Panel {
-        Panel { dir: dir.into(), ..Panel::default() }
+        Panel { dir: PathBuf::from(dir).into(), ..Panel::default() }
     }
 
     #[test]

@@ -3,15 +3,16 @@
 
 use std::path::Path;
 
-use crate::app::dialogs::{Dialog, DialogKind, DrivePopup, Extra};
+use crate::app::dialogs::{Dialog, DialogKind, DrivePopup, Extra, PopupItem};
 use crate::app::format::format_size;
 use crate::app::history_list::{HistoryList, VISIBLE};
 use crate::app::jobs::JOB_CARD_DELAY_MS;
-use crate::app::layout::{CARD_W, DIALOG_LABEL_W, ICON_W, OPTION_H, OPTIONS_ROWS_Y, ROW_H, STATUS_H};
+use crate::app::layout::{CARD_W, DIALOG_LABEL_W, ICON_W, OPTION_H, OPTIONS_ROWS_Y, POPUP_CLOSE_W, ROW_H, STATUS_H};
 use crate::app::options::{LANGUAGE_ROW, ROWS, SWITCHES, is_disabled, is_on};
 use crate::app::{App, Tone};
 use crate::i18n::{self, Lang, t, tf};
 use crate::sys::gfx::{Canvas, Rect, rect};
+use crate::ui::panel::HOST_GLYPH;
 use crate::ui::widgets::{draw_card, draw_chips, draw_input};
 
 /// Icon and label for a drive type (`GetDriveTypeW`).
@@ -255,20 +256,39 @@ impl App {
     pub(crate) fn draw_drives(&self, c: &Canvas, d: &DrivePopup, w: f32) {
         let t = self.theme;
         let (px, _) = self.panel_x(d.panel, w);
-        let r = self.popup_rect(px, d.drives.len());
+        let r = self.popup_rect(px, d.items.len());
         let shadow = rect(r.left + 2.0, r.top + 4.0, r.right - r.left, r.bottom - r.top);
         c.fill_round(shadow, 8.0, crate::theme::rgba(0x000000, 0.35));
         c.fill_round(r, 8.0, t.popup_bg);
         c.stroke_round(r, 8.0, 1.0, t.popup_border);
-        for (i, drive) in d.drives.iter().enumerate() {
+        let rw = r.right - r.left;
+        for (i, item) in d.items.iter().enumerate() {
             let y = r.top + 4.0 + i as f32 * ROW_H;
             if i == d.sel {
-                c.fill_round(rect(r.left + 4.0, y, r.right - r.left - 8.0, ROW_H), 4.0, t.cursor_active);
+                c.fill_round(rect(r.left + 4.0, y, rw - 8.0, ROW_H), 4.0, t.cursor_active);
             }
-            let (glyph, label) = drive_info(drive.kind);
-            c.text(&[glyph], &c.fonts.icon, rect(r.left + 8.0, y, ICON_W, ROW_H), t.accent);
-            c.text(&drive.root[..2], &c.fonts.path, rect(r.left + 38.0, y, 30.0, ROW_H), t.text);
-            c.text_str(label, &c.fonts.small, rect(r.left + 72.0, y, r.right - r.left - 80.0, ROW_H), t.text_dim);
+            match item {
+                PopupItem::Drive(drive) => {
+                    let (glyph, label) = drive_info(drive.kind);
+                    c.text(&[glyph], &c.fonts.icon, rect(r.left + 8.0, y, ICON_W, ROW_H), t.accent);
+                    c.text(&drive.root[..2], &c.fonts.path, rect(r.left + 38.0, y, 30.0, ROW_H), t.text);
+                    c.text_str(label, &c.fonts.small, rect(r.left + 72.0, y, rw - 80.0, ROW_H), t.text_dim);
+                }
+                PopupItem::Host { name, connected } => {
+                    if i > 0 && matches!(d.items[i - 1], PopupItem::Drive(_)) {
+                        c.fill(rect(r.left + 8.0, y, rw - 16.0, 1.0), t.divider);
+                    }
+                    let color = if *connected { t.accent } else { t.text_dim };
+                    c.text(&[HOST_GLYPH], &c.fonts.icon, rect(r.left + 8.0, y, ICON_W, ROW_H), color);
+                    let name_w = rw - 38.0 - if *connected { POPUP_CLOSE_W + 4.0 } else { 8.0 };
+                    let text_color = if *connected { t.text } else { t.text_dim };
+                    c.text_str(name, &c.fonts.name, rect(r.left + 38.0, y, name_w, ROW_H), text_color);
+                    if *connected {
+                        let x = rect(r.right - POPUP_CLOSE_W - 4.0, y, POPUP_CLOSE_W, ROW_H);
+                        c.text(&[0xE711], &c.fonts.icon, x, t.text_dim);
+                    }
+                }
+            }
         }
     }
 }

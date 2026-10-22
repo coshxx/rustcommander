@@ -6,6 +6,7 @@ pub mod archive;
 pub mod dirsize;
 pub mod find;
 pub mod listing;
+pub mod location;
 pub mod mask;
 pub mod names;
 pub mod sort;

@@ -4,7 +4,9 @@
     "cancel": "Cancel",
     "close": "Close",
     "folder": "Folder",
-    "esc_cancels": "Esc cancels"
+    "esc_cancels": "Esc cancels",
+    "yes": "Yes",
+    "no": "No"
   },
   "keybar": {
     "tab": { "key": "Tab", "label": "Switch" },
@@ -76,7 +78,9 @@
     "next_field": "Next field",
     "quoted": "“{name}”",
     "items_one": "{n} item",
-    "items_other": "{n} items"
+    "items_other": "{n} items",
+    "disconnect": "Disconnect",
+    "disconnect_question": "A job is still using {host}. Cancel it and disconnect?"
   },
   "pack": {
     "store": "Store",
@@ -120,7 +124,11 @@
     "unpack_in_archive": "Inside an archive, F5 extracts",
     "no_archives": "No archives selected",
     "no_history": "No history",
-    "no_history_matches": "No matches in the history"
+    "no_history_matches": "No matches in the history",
+    "remote_unsupported": "Not available on SFTP servers yet",
+    "move_between": "Moving between local and SFTP is not supported yet – copy, then delete",
+    "remote_to_remote": "Copying between SFTP folders is not supported yet",
+    "disconnected": "Disconnected from {host}"
   },
   "options": {
     "title": "Options",
@@ -188,6 +196,16 @@
     "is_folder": "is a folder",
     "context_menu": "Context menu not available",
     "invalid_source": "invalid source path",
-    "file_changed": "file changed while reading"
+    "file_changed": "file changed while reading",
+    "same_path": "source and target are the same",
+    "into_itself": "target is inside the source"
+  },
+  "askpass": {
+    "title": "SSH",
+    "password": "Password",
+    "host_key": "Unknown host key"
+  },
+  "sftp": {
+    "lost": "connection lost"
   }
 }

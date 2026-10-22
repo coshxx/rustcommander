@@ -9,6 +9,7 @@ use crate::app::dialogs::{Dialog, DialogKind, Extra, transfer_prompt};
 use crate::app::layout::Hit;
 use crate::app::{App, Mode};
 use crate::files::listing::Kind;
+use crate::files::location::Location;
 use crate::files::names::fold_case;
 
 /// Where a drop would go: into `panel`'s directory, or into the folder in its row `row`.
@@ -36,7 +37,8 @@ impl App {
         self.set_drop_hover(None);
         let Some((hover, dest)) = self.drop_target(x, y, &paths) else { return false };
         let kind = if mov { DialogKind::Move } else { DialogKind::Copy };
-        let (message, input) = transfer_prompt(kind, &paths, &dest);
+        let sources: Vec<Location> = paths.into_iter().map(Location::Local).collect();
+        let (message, input) = transfer_prompt(kind, &sources, &dest.into());
         // Dragged from a panel: like F5 there. From outside: the dialog sits on the target panel.
         let (panel, keep_marks) = match self.drag_source {
             Some(p) => (p, false),
@@ -46,7 +48,7 @@ impl App {
         self.mode = Mode::Dialog(Dialog {
             kind,
             panel,
-            sources: paths,
+            sources,
             message,
             input: Some(input),
             extra: Extra::None,
@@ -84,10 +86,12 @@ impl App {
         if p.archive.is_some() {
             return None;
         }
+        // Not onto a server (yet).
+        let dir = p.dir.local()?;
         let folder = row.and_then(|r| p.entries.get(r).filter(|e| e.kind == Kind::Dir).map(|e| (r, e.os_name())));
         let (row, dest) = match folder {
-            Some((r, name)) => (Some(r), p.dir.join(name)),
-            None => (None, p.dir.clone()),
+            Some((r, name)) => (Some(r), dir.join(name)),
+            None => (None, dir.to_path_buf()),
         };
         (!pointless(paths, &dest)).then_some((DropHover { panel, row }, dest))
     }

@@ -3,16 +3,18 @@
 
 use std::path::{Path, PathBuf};
 
-use windows::Win32::Foundation::{FILETIME, HGLOBAL, HWND, LPARAM, SYSTEMTIME, WPARAM};
+use windows::Win32::Foundation::{FILETIME, GlobalFree, HANDLE, HGLOBAL, HWND, LPARAM, SYSTEMTIME, WPARAM};
 use windows::Win32::Globalization::{
     CP_ACP, CP_OEMCP, MB_USEGLYPHCHARS, MULTI_BYTE_TO_WIDE_CHAR_FLAGS, MultiByteToWideChar,
 };
 use windows::Win32::Graphics::Gdi::InvalidateRect;
 use windows::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives};
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
-use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
+use windows::Win32::System::DataExchange::{
+    CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, SetClipboardData,
+};
 use windows::Win32::System::Environment::ExpandEnvironmentStringsW;
-use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
+use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
 use windows::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VIRTUAL_KEY};
 use windows::Win32::UI::Shell::ShellExecuteW;
@@ -116,8 +118,9 @@ pub fn drives() -> Vec<Drive> {
         .collect()
 }
 
+const CF_UNICODETEXT: u32 = 13;
+
 pub fn clipboard_text(hwnd: HWND) -> Option<Vec<u16>> {
-    const CF_UNICODETEXT: u32 = 13;
     unsafe {
         OpenClipboard(Some(hwnd)).ok()?;
         let mut out = None;
@@ -137,6 +140,34 @@ pub fn clipboard_text(hwnd: HWND) -> Option<Vec<u16>> {
         }
         let _ = CloseClipboard();
         out
+    }
+}
+
+/// Put `text` on the clipboard as Unicode text; `false` on failure.
+pub fn set_clipboard_text(hwnd: HWND, text: &[u16]) -> bool {
+    unsafe {
+        let Ok(hg) = GlobalAlloc(GMEM_MOVEABLE, (text.len() + 1) * 2) else { return false };
+        let p = GlobalLock(hg) as *mut u16;
+        if p.is_null() {
+            let _ = GlobalFree(Some(hg));
+            return false;
+        }
+        // SAFETY: the block holds `text.len() + 1` u16s and stays locked until GlobalUnlock.
+        std::ptr::copy_nonoverlapping(text.as_ptr(), p, text.len());
+        *p.add(text.len()) = 0;
+        let _ = GlobalUnlock(hg);
+        if OpenClipboard(Some(hwnd)).is_err() {
+            let _ = GlobalFree(Some(hg));
+            return false;
+        }
+        let _ = EmptyClipboard();
+        // On success the clipboard owns the memory; otherwise it is still ours to free.
+        let ok = SetClipboardData(CF_UNICODETEXT, Some(HANDLE(hg.0))).is_ok();
+        if !ok {
+            let _ = GlobalFree(Some(hg));
+        }
+        let _ = CloseClipboard();
+        ok
     }
 }
 

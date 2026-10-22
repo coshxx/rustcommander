@@ -6,13 +6,15 @@ use std::os::windows::ffi::OsStringExt;
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetDoubleClickTime, VIRTUAL_KEY, VK_ESCAPE, VK_RETURN, VK_TAB};
 
-use crate::app::format::{utf16, valid_name};
+use crate::app::format::{utf16, valid_name, valid_remote_name};
 use crate::app::layout::ROW_H;
 use crate::app::text_input::TextInput;
 use crate::app::{App, Mode, TIMER_RENAME, Tone};
 use crate::files::listing::Kind;
+use crate::files::location::Location;
 use crate::i18n::{t, tf};
-use crate::ops::{error_text, same_name_ignoring_case};
+use crate::ops::{Job, error_text, same_name_ignoring_case};
+use crate::sftp::RemotePath;
 use crate::sys::win;
 
 /// The mouse may move this far (DIPs) between the click and the start of the rename.
@@ -123,7 +125,13 @@ impl App {
         let Mode::Rename(r) = &self.mode else { return true };
         let new = r.input.string().trim().to_string();
         let panel = r.panel;
-        let dir = self.panels[panel].dir.clone();
+        let dir = match &self.panels[panel].dir {
+            Location::Local(dir) => dir.clone(),
+            Location::Remote(dir) => {
+                let from = dir.join(&String::from_utf16_lossy(&r.name));
+                return self.commit_remote_rename(from, new);
+            }
+        };
         let from = dir.join(OsString::from_wide(&r.name));
         if new.is_empty() || from.file_name().is_some_and(|n| n == new.as_str()) {
             self.mode = Mode::Normal;
@@ -144,7 +152,27 @@ impl App {
             return false;
         }
         self.mode = Mode::Normal;
-        self.navigate(panel, dir, Some(utf16(&new).into()));
+        self.navigate(panel, dir.into(), Some(utf16(&new).into()));
+        true
+    }
+
+    /// On a server the rename runs as a job (it needs the network); the cursor follows the new
+    /// name when it is done.
+    fn commit_remote_rename(&mut self, from: RemotePath, new: String) -> bool {
+        if new.is_empty() || from.name() == new {
+            self.mode = Mode::Normal;
+            return true;
+        }
+        if !valid_remote_name(&new, false) {
+            self.notify(tf("notice.invalid_name", &[("name", &new)]), Tone::Error);
+            return false;
+        }
+        if self.job.is_some() {
+            self.notify(t("notice.job_running").into(), Tone::Error);
+            return false;
+        }
+        self.mode = Mode::Normal;
+        self.start_job(Job::RemoteRename { from, to: new }, t("dialog.rename"), None);
         true
     }
 

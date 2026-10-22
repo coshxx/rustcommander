@@ -5,12 +5,16 @@ use crate::app::layout::{CHIP_W, COLS_H, Columns, DATE_W, ICON_W, PAD, PATH_H, R
 use crate::app::mouse::Drag;
 use crate::app::{App, LOADING_DELAY_MS, Mode};
 use crate::files::listing::{Entry, Kind};
+use crate::files::location::Location;
 use crate::files::sort::SortKey;
 use crate::i18n::{self, tf, tn};
 use crate::panel::Panel;
 use crate::sys::gfx::{Canvas, rect};
 use crate::theme::{Color, Theme};
 use crate::ui::widgets::draw_input;
+
+/// Segoe Fluent "Network": SFTP hosts in the drive popup and the drive chip.
+pub(crate) const HOST_GLYPH: u16 = 0xE968;
 
 pub(crate) fn icon(kind: Kind, t: &Theme) -> (u16, Color) {
     match kind {
@@ -63,10 +67,18 @@ impl App {
             c.fill(rect(x, PATH_H - 2.0, pw, 2.0), t.accent);
         }
         let shown = a.panel.shown_path();
-        let drive: String = shown.display().to_string().chars().take(2).collect();
         let chip = rect(x + PAD, 8.0, CHIP_W - 6.0, PATH_H - 18.0);
         c.fill_round(chip, 5.0, t.popup_bg);
-        c.text_str(&drive, &f.small_center, chip, if a.active { t.text } else { t.text_dim });
+        let chip_color = if a.active { t.text } else { t.text_dim };
+        // On a server: a network icon instead of the drive letter.
+        let drive: String = match shown {
+            Location::Local(p) => p.display().to_string().chars().take(2).collect(),
+            Location::Remote(_) => {
+                c.text(&[HOST_GLYPH], &f.icon, chip, if a.active { t.accent } else { t.text_dim });
+                String::new()
+            }
+        };
+        c.text_str(&drive, &f.small_center, chip, chip_color);
 
         let path_x = x + PAD + CHIP_W + 2.0;
         let loading = a.panel.loading_for_ms().is_some_and(|ms| ms >= LOADING_DELAY_MS as u128);
@@ -78,7 +90,7 @@ impl App {
             }
             _ => {
                 let r = rect(path_x, 0.0, x + pw - PAD - path_x - right_w, PATH_H - 2.0);
-                let s = shown.display().to_string();
+                let s = shown.to_string();
                 let s = s.get(2..).filter(|_| drive.ends_with(':')).unwrap_or(&s);
                 c.text_str(s, &f.path, r, if a.active { t.text } else { t.text_dim });
                 if loading {

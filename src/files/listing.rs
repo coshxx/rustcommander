@@ -15,6 +15,7 @@ use windows::Win32::Storage::FileSystem::{
 use windows::core::PCWSTR;
 
 use crate::files::archive;
+use crate::files::location::Location;
 use crate::files::names::{natural_cmp, to_utf16_nul};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -64,7 +65,7 @@ impl Entry {
 }
 
 pub struct Listing {
-    pub dir: PathBuf,
+    pub dir: Location,
     pub entries: Vec<Entry>,
     /// Entry to put the cursor on (e.g. when a file path was entered).
     pub select: Option<Box<[u16]>>,
@@ -172,9 +173,14 @@ fn entry_from(data: &WIN32_FIND_DATAW) -> Option<Entry> {
     })
 }
 
-/// List and sort a directory (or a directory inside an archive). If `path` is a file, its
-/// directory is loaded instead and the file gets selected. Runs on a loader thread; `cancel` aborts it.
-pub fn load(path: &Path, cancel: &AtomicBool) -> Result<Listing, String> {
+/// List and sort a directory (or a directory inside an archive, or on an SFTP server). If `path`
+/// is a file, its directory is loaded instead and the file gets selected. Runs on a loader
+/// thread; `cancel` aborts it.
+pub fn load(path: &Location, cancel: &AtomicBool) -> Result<Listing, String> {
+    let path = match path {
+        Location::Local(p) => p,
+        Location::Remote(r) => return crate::sftp::load(r, cancel),
+    };
     if let Some((archive, inner)) = archive::split(path) {
         return archive::load(path, archive, &inner, cancel);
     }
@@ -231,13 +237,13 @@ pub fn load(path: &Path, cancel: &AtomicBool) -> Result<Listing, String> {
         entries.insert(0, Entry::parent());
     }
 
-    Ok(Listing { dir, entries, select, dirs, files, bytes, elapsed: start.elapsed(), archive: None })
+    Ok(Listing { dir: dir.into(), entries, select, dirs, files, bytes, elapsed: start.elapsed(), archive: None })
 }
 
 /// A running load; `cancel` is set as soon as it is superseded.
 pub struct Pending {
     pub id: u64,
-    pub path: PathBuf,
+    pub path: Location,
     pub select: Option<Box<[u16]>>,
     /// Reload of the same directory: keep the cursor on whatever entry it is on when the
     /// result arrives (the user may have moved it meanwhile).

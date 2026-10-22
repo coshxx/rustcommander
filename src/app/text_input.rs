@@ -78,6 +78,14 @@ impl TextInput {
                     self.text.remove(self.caret);
                 }
             }
+            VK_C | VK_X if ctrl => {
+                if let Some(sel) = self.selection() {
+                    win::set_clipboard_text(hwnd, &self.text[sel]);
+                    if vk == VK_X {
+                        self.delete_selection();
+                    }
+                }
+            }
             VK_V if ctrl => {
                 self.delete_selection();
                 if let Some(clip) = win::clipboard_text(hwnd) {

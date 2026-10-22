@@ -196,7 +196,7 @@ fn rename_and_mkdir() {
     let t = Scratch::new("rename");
     write(&t.0.join("a.txt"), "A");
     let (s, _) = run(Job::Rename { from: t.0.join("a.txt"), to: "b.txt".into() }, Answer::Skip);
-    assert_eq!(s.select.as_deref(), Some(t.0.join("b.txt").as_path()));
+    assert_eq!(s.select.as_ref().and_then(|l| l.local()), Some(t.0.join("b.txt").as_path()));
     let (s, _) = run(Job::MkDir { path: t.0.join("neu") }, Answer::Skip);
     assert!(s.errors.is_empty());
     assert!(t.0.join("neu").is_dir());
@@ -253,7 +253,7 @@ fn make_tar(entries: &[(&str, &str)]) -> Vec<u8> {
 }
 
 fn names_in(dir: &Path) -> Vec<String> {
-    let l = crate::files::listing::load(dir, &AtomicBool::new(false)).unwrap();
+    let l = crate::files::listing::load(&dir.to_path_buf().into(), &AtomicBool::new(false)).unwrap();
     assert!(l.archive.is_some());
     l.entries.iter().map(|e| String::from_utf16_lossy(&e.name)).collect()
 }
@@ -296,7 +296,7 @@ fn archives_list_and_extract() {
         let (s, _) = run(job, Answer::Skip);
         assert!(s.errors.is_empty(), "{ext}: {:?}", s.errors);
         assert_eq!(fs::read_to_string(t.0.join("renamed.txt")).unwrap(), "A");
-        assert_eq!(s.select, Some(t.0.join("renamed.txt")));
+        assert_eq!(s.select, Some(t.0.join("renamed.txt").into()));
     }
 }
 
@@ -338,7 +338,7 @@ fn pack_and_unpack_round_trip() {
         let sources = vec![t.0.join("src"), t.0.join("einzeln.txt")];
         let (s, _) = run(Job::Pack { sources: sources.clone(), dest: archive.clone(), format, level }, Answer::Skip);
         assert!(s.errors.is_empty(), "{:?}", s.errors);
-        assert_eq!((s.done, s.select.as_deref()), (2, Some(archive.as_path())));
+        assert_eq!((s.done, s.select.as_ref().and_then(|l| l.local())), (2, Some(archive.as_path())));
         let mut top: Vec<String> = names_in(&archive).into_iter().filter(|n| n != "..").collect();
         top.sort();
         assert_eq!(top, ["einzeln.txt", "src"]);
@@ -353,7 +353,7 @@ fn pack_and_unpack_round_trip() {
             run(Job::Unpack { archives: vec![archive.clone()], dest: dest.clone(), subdir: true }, Answer::Skip);
         assert!(s.errors.is_empty(), "{:?}", s.errors);
         let root = dest.join(format!("out-{}", level.id()));
-        assert_eq!(s.select.as_deref(), Some(root.as_path()));
+        assert_eq!(s.select.as_ref().and_then(|l| l.local()), Some(root.as_path()));
         assert_eq!(fs::read_to_string(root.join("src/Übersicht.txt")).unwrap(), "Grüße");
         assert_eq!(fs::read_to_string(root.join("src/sub/b.txt")).unwrap().len(), 100_000);
         assert!(root.join("src/leer").is_dir());

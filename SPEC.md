@@ -360,6 +360,52 @@ without a dot. Num+ adds to the existing marks, Num− only removes matches. The
 - One job for all archives with progress, cancel and the conflict question; encrypted entries are
   reported and skipped. With one archive into its own folder the cursor lands on that folder.
 
+## SFTP
+
+Folders on SSH servers open in a panel like local ones.
+
+- **Transport:** Windows' own OpenSSH client (`%SystemRoot%\System32\OpenSSH\ssh.exe`, else
+  `ssh.exe` on the `PATH`) runs as a hidden child process: `ssh -s [-p port] [user@]host sftp`.
+  The app speaks SFTP version 3 over its stdin/stdout itself; no new crate. Keys, the agent,
+  `~/.ssh/config` (aliases, ports, `ProxyJump` …) and `known_hosts` work because `ssh.exe` handles
+  them. Without the OpenSSH client connecting shows an error.
+- **Paths:** `sftp://[user@]host[:port]/path`. `sftp://host` alone opens the home directory.
+  Typed in the path bar (Ctrl+L), as `cd sftp://…` or bare in the command line; relative `cd`
+  works inside a remote panel. Shown like that in the path bar; the drive chip shows a network
+  icon.
+- **Drive list (Alt+F1/F2):** below the drives, the hosts from `~/.ssh/config` (`Host` lines
+  without wildcards) and every host connected right now (highlighted). Enter or a click connects
+  and opens the home directory (or the folder the panel was in last on that host). On a
+  connected host, Del or the ✕ at its right end disconnects.
+- **Passwords and host keys:** `ssh.exe` asks through `SSH_ASKPASS` (with
+  `SSH_ASKPASS_REQUIRE=force`), which points to `rustcommander.exe` itself; `RC_ASKPASS=1` in
+  ssh's environment makes that start show only a small window in the app's look: the prompt and
+  a masked password field (Enter / Esc), or Yes/No for an unknown host key (then saved to
+  `known_hosts` by `ssh.exe`). The answer goes to stdout; passwords are never stored.
+- **Connections:** one per host, shared by both panels and jobs, opened on first use. Closed after
+  5 minutes without use unless a panel shows it. A broken connection shows its error in the panel;
+  Ctrl+R / F2 connects again. Disconnecting while a job uses the connection asks first (the job
+  is cancelled). A panel on a host that gets disconnected goes back to its last local folder.
+- **Listing:** `.`-files are dimmed like hidden files. Symbolic links to folders are folders,
+  links to files are files (size and date of the target); broken links are dimmed. No owner,
+  group or permission columns.
+- **Operations:**
+  - F5 copies local → remote and remote → local as a job (progress, cancel, conflict question;
+    file dates are kept; a cancelled or failed file is removed). Remote → remote: notice.
+  - F6 within the same host renames (also into another folder); between local and remote:
+    notice ("copy, then delete").
+  - Shift+F6 / slow second click rename, F7 creates folders (`a\b` and `a/b` nested), F8/Del
+    and Shift+F8/Shift+Del delete permanently (there is no recycle bin on the server; the
+    question says so).
+  - Enter on a file downloads it to `%TEMP%\RustCommander\…` and opens it (changes are not
+    uploaded back); F3 views it in the lister the same way. Enter on an archive: notice.
+- **Not on remote panels (notice):** F4 / Shift+F4, folder sizes (Space only marks), Alt+F5 /
+  Alt+F9, Alt+F7 in a remote folder, the shell context menu, dragging out, dropping onto the
+  panel, running commands from the command line. No automatic refresh (Ctrl+R reloads; the
+  app's own jobs reload as usual).
+- On startup a panel that was on a remote folder opens its last local folder instead (no
+  connection or password prompt at startup).
+
 ## Lister (F3)
 
 A separate, non-modal window per file, like Total Commander's Lister; any number can be open.
@@ -391,5 +437,8 @@ Closing the main window closes them.
 
 Lister: selecting and copying text, images, following growing files, N/P for the next/previous
 file, line numbers, hex search (`4D 5A`). Archives: adding to existing archives, password dialog, archives inside archives,
-7-Zip's `7z.dll` as a fallback for Windows 10. Parallel copying of many small files, system icons (async, cached), live filter, light theme, normalizing path casing
+7-Zip's `7z.dll` as a fallback for Windows 10. SFTP: editing remote files (F4) with upload
+on save, search, folder sizes, automatic refresh, archives on the server, remote → remote copy,
+moving between local and remote, owner/permission columns, context menu, drag & drop, a
+connection manager of its own. Parallel copying of many small files, system icons (async, cached), live filter, light theme, normalizing path casing
 (typed `c:\windows` → `C:\Windows`), partial redraws (if frame time on large windows becomes an issue).

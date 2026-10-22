@@ -8,12 +8,13 @@ use std::process::Command;
 
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 
-use crate::app::format::{parse_path, utf16};
+use crate::app::format::{parse_location, parse_path, utf16};
 use crate::app::text_input::TextInput;
 use crate::app::{App, Tone};
 use crate::config::history;
 use crate::files::listing::Kind;
-use crate::i18n::tf;
+use crate::i18n::{t, tf};
+use crate::sftp::RemotePath;
 
 /// `CREATE_NEW_CONSOLE`: the command gets its own console window.
 const CREATE_NEW_CONSOLE: u32 = 0x10;
@@ -106,8 +107,7 @@ impl App {
     fn insert_current_name(&mut self, full: bool) {
         let p = &self.panels[self.active];
         let Some(e) = p.current().filter(|e| e.kind != Kind::Parent) else { return };
-        let mut s =
-            if full { p.dir.join(e.os_name()).display().to_string() } else { e.os_name().display().to_string() };
+        let mut s = if full { p.dir.join(e.os_name()).to_string() } else { e.os_name().display().to_string() };
         if s.contains(' ') {
             s = format!("\"{s}\"");
         }
@@ -147,7 +147,7 @@ impl App {
             Parsed::Cd(None) => true,
             // Not checked here: on an unreachable network path that would freeze the window. A
             // failed load shows its error like any other.
-            Parsed::Cd(Some(arg)) => match parse_path(&utf16(&arg), &dir) {
+            Parsed::Cd(Some(arg)) => match parse_location(&utf16(&arg), &dir) {
                 Some(p) => {
                     self.navigate(a, p, None);
                     true
@@ -157,20 +157,23 @@ impl App {
                     false
                 }
             },
-            Parsed::Other if line.trim_start_matches('"').starts_with(r"\\") => {
-                match parse_path(&utf16(&line), &dir) {
+            Parsed::Other if line.trim_start_matches('"').starts_with(r"\\") || RemotePath::parse(&line).is_some() => {
+                match parse_location(&utf16(&line), &dir) {
                     Some(p) => self.navigate(a, p, None),
                     None => self.notify(tf("notice.no_folder", &[("path", &line)]), Tone::Error),
                 }
                 true
             }
-            Parsed::Other => match parse_path(&utf16(&line), &dir).filter(|p| p.is_dir()) {
-                Some(p) => {
-                    self.navigate(a, p, None);
-                    true
+            Parsed::Other => {
+                let base = dir.local().unwrap_or(&self.panels[a].last_local);
+                match parse_path(&utf16(&line), base).filter(|p| p.is_dir()) {
+                    Some(p) => {
+                        self.navigate(a, p.into(), None);
+                        true
+                    }
+                    None => self.run_external(&line, keep_open),
                 }
-                None => self.run_external(&line, keep_open),
-            },
+            }
         };
         if ok {
             self.cmdline = TextInput::new(Vec::new());
@@ -191,8 +194,10 @@ impl App {
     /// `cmd /c` (or `/k`) in a new console, in the active panel's folder (for an archive: the
     /// folder holding it).
     fn run_external(&mut self, line: &str, keep_open: bool) -> bool {
-        let p = &self.panels[self.active];
-        let cwd = p.archive.as_deref().and_then(Path::parent).unwrap_or(&p.dir).to_path_buf();
+        let Some(cwd) = self.panels[self.active].folder().map(Path::to_path_buf) else {
+            self.notify(t("notice.remote_unsupported").into(), Tone::Info);
+            return false;
+        };
         let flag = if keep_open { "/k" } else { "/c" };
         let spawned = Command::new("cmd.exe")
             .raw_arg(format!("{flag} {line}"))

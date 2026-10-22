@@ -234,7 +234,16 @@ pub fn load(path: &Path, archive: PathBuf, inner: &str, cancel: &AtomicBool) -> 
     let files = entries.len() - dirs;
     // Inside an archive there is always a way up: to the directory holding the archive.
     entries.insert(0, Entry::parent());
-    Ok(Listing { dir, entries, select, dirs, files, bytes, elapsed: start.elapsed(), archive: Some(archive) })
+    Ok(Listing {
+        dir: dir.into(),
+        entries,
+        select,
+        dirs,
+        files,
+        bytes,
+        elapsed: start.elapsed(),
+        archive: Some(archive),
+    })
 }
 
 #[cfg(test)]

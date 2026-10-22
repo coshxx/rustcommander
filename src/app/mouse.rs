@@ -84,6 +84,7 @@ impl App {
         let hit = self.hit(x, y);
         if let Mode::Drives(_) = self.mode {
             match hit {
+                Hit::Popup(i) if !right && self.on_popup_close(i, x) => self.disconnect_popup_item(i),
                 Hit::Popup(i) if !right => self.choose_drive(i),
                 _ => self.mode = Mode::Normal,
             }
@@ -132,6 +133,7 @@ impl App {
                     let panel = &self.panels[p];
                     if matches!(self.mode, Mode::Normal)
                         && panel.archive.is_none()
+                        && !panel.is_remote()
                         && panel.entries[row].kind != Kind::Parent
                     {
                         self.drag = Some(Drag::Out { panel: p, row, at: (x, y) });
@@ -240,7 +242,7 @@ impl App {
         self.cancel_pending_rename();
         let p = &self.panels[panel];
         let Some(e) = p.entries.get(row).filter(|e| e.kind != Kind::Parent) else { return };
-        let paths = if e.marked { p.targets() } else { vec![p.dir.join(e.os_name())] };
+        let paths = if e.marked { p.local_targets() } else { p.local_path(e).into_iter().collect() };
         self.drag_request = paths;
         self.drag_source = Some(panel);
         SendHwnd::new(self.hwnd).post(WM_APP_DRAG);

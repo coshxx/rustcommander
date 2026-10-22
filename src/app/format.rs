@@ -3,7 +3,9 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::files::location::Location;
 use crate::i18n::{self, Lang, tf, tn};
+use crate::sftp::RemotePath;
 use crate::sys::win;
 
 pub(crate) fn utf16(s: &str) -> Vec<u16> {
@@ -76,9 +78,9 @@ fn format_date_in((y, mo, d, h, mi): (u16, u16, u16, u16, u16), lang: Lang) -> S
 }
 
 /// The quoted name of a single item, otherwise "N items".
-pub(crate) fn describe(sources: &[PathBuf]) -> String {
+pub(crate) fn describe(sources: &[Location]) -> String {
     match sources {
-        [one] => quoted(&one.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()),
+        [one] => quoted(&one.file_name().unwrap_or_default()),
         many => tn("dialog.items", many.len() as u64),
     }
 }
@@ -92,6 +94,13 @@ pub(crate) fn quoted(name: &str) -> String {
 pub(crate) fn valid_name(name: &str, allow_sep: bool) -> bool {
     let bad = |c: char| matches!(c, '<' | '>' | ':' | '"' | '/' | '|' | '?' | '*') || (c == '\\' && !allow_sep);
     !name.is_empty() && name != "." && name != ".." && !name.chars().any(|c| bad(c) || (c as u32) < 0x20)
+}
+
+/// Name check on a server: anything except `/` and `\`, `.`, `..` and control characters;
+/// `allow_sep` permits `/` and `\` between the parts of nested new folders.
+pub(crate) fn valid_remote_name(name: &str, allow_sep: bool) -> bool {
+    let ok = |p: &str| !p.is_empty() && p != "." && p != ".." && !p.chars().any(|c| (c as u32) < 0x20);
+    if allow_sep { name.split(['/', '\\']).all(ok) } else { ok(name) && !name.contains(['/', '\\']) }
 }
 
 /// Turn path bar input into an absolute path.
@@ -109,6 +118,31 @@ pub(crate) fn parse_path(input: &[u16], base: &Path) -> Option<PathBuf> {
     std::path::absolute(p).ok()
 }
 
+/// Like `parse_path`, but also `sftp://…`; on a server (`base` remote) anything that isn't a
+/// Windows path (`C:\…`, `\\server`, `%VAR%`) is a path on that server, relative to `base`.
+pub(crate) fn parse_location(input: &[u16], base: &Location) -> Option<Location> {
+    let text = String::from_utf16_lossy(input);
+    let text = text.trim().trim_matches('"');
+    if let Some(r) = RemotePath::parse(text) {
+        return Some(Location::Remote(r));
+    }
+    match base {
+        Location::Remote(r) if !text.is_empty() && !is_windows_path(text) => Some(Location::Remote(r.resolve(text))),
+        Location::Remote(_) => parse_path(input, Path::new("")).map(Location::Local),
+        Location::Local(d) => parse_path(input, d).map(Location::Local),
+    }
+}
+
+fn is_windows_path(s: &str) -> bool {
+    let b = s.as_bytes();
+    s.starts_with(r"\\") || s.contains('%') || (b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':')
+}
+
+/// Typed with a trailing `\` or `/`: means "into this folder".
+pub(crate) fn ends_with_separator(input: &str) -> bool {
+    input.trim().trim_matches('"').ends_with(['\\', '/'])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -121,6 +155,22 @@ mod tests {
         assert!(!valid_name("", true));
         assert!(!valid_name("..", false));
         assert!(!valid_name("x?.txt", false));
+    }
+
+    #[test]
+    fn locations() {
+        let remote = Location::Remote(RemotePath::new("h", "/home/u"));
+        let at = |s: &str, base: &Location| parse_location(&utf16(s), base);
+        assert_eq!(at("..", &remote), Some(Location::Remote(RemotePath::new("h", "/home"))));
+        assert_eq!(at("/etc", &remote), Some(Location::Remote(RemotePath::new("h", "/etc"))));
+        assert_eq!(at(r"D:\x", &remote), Some(Location::Local(r"D:\x".into())));
+        assert_eq!(
+            at("sftp://g/x", &Location::Local(r"C:\".into())),
+            Some(Location::Remote(RemotePath::new("g", "/x")))
+        );
+        assert_eq!(at("sub", &Location::Local(r"C:\a".into())), Some(Location::Local(r"C:\a\sub".into())));
+        assert!(ends_with_separator("sftp://h/x/ "));
+        assert!(!ends_with_separator(r"C:\x"));
     }
 
     #[test]

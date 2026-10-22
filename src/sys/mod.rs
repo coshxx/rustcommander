@@ -4,6 +4,7 @@
 //! (`drop_target`).
 //! The app logic calls these instead of using `unsafe` itself.
 
+pub mod askpass;
 pub mod drop_target;
 pub mod gfx;
 pub mod libarchive;
