@@ -250,6 +250,10 @@ impl App {
             return;
         }
         let a = self.active;
+        if self.panels[a].dir.is_server() && !matches!(kind, DialogKind::Select { .. }) {
+            self.notify(t("notice.server_view").into(), Tone::Info);
+            return;
+        }
         let remote = self.panels[a].is_remote();
         // Archives are read-only: copying out of one extracts, everything that writes is refused.
         let kind = match kind {

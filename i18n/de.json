@@ -108,6 +108,7 @@
   },
   "notice": {
     "read_only": "Archive sind schreibgeschützt",
+    "server_view": "Die Freigabeliste dient nur zum Navigieren",
     "job_running": "Es läuft bereits ein Vorgang",
     "invalid_name": "Ungültiger Name: „{name}“",
     "cannot_create": "„{name}“ lässt sich nicht anlegen: {error}",

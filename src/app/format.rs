@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::files::location::Location;
+use crate::files::location::{Location, server_path, server_root};
 use crate::i18n::{self, Lang, tf, tn};
 use crate::sftp::RemotePath;
 use crate::sys::win;
@@ -113,6 +113,17 @@ pub(crate) fn parse_path(input: &[u16], base: &Path) -> Option<PathBuf> {
     if s.len() == 2 && s.ends_with(':') {
         s.push('\\');
     }
+    // `\\server` has no root for `std::path` (it would land on the current drive), and `..` does
+    // not leave a share: both mean the server's list of shares.
+    if let Some(server) = server_root(Path::new(&s)) {
+        return Some(server_path(server));
+    }
+    if matches!(s.as_str(), ".." | r"..\" | "../") {
+        let base = Location::Local(base.to_path_buf());
+        if let Some(Location::Local(server)) = base.parent().filter(Location::is_server) {
+            return Some(server);
+        }
+    }
     let p = PathBuf::from(s);
     let p = if p.is_absolute() { p } else { base.join(p) };
     std::path::absolute(p).ok()
@@ -169,6 +180,11 @@ mod tests {
             Some(Location::Remote(RemotePath::new("g", "/x")))
         );
         assert_eq!(at("sub", &Location::Local(r"C:\a".into())), Some(Location::Local(r"C:\a\sub".into())));
+        let local = |s: &str| Location::Local(s.into());
+        assert_eq!(at(r"\\wsl$\", &local(r"C:\a")), Some(local(r"\\wsl$")));
+        assert_eq!(at(r"\\wsl$", &remote), Some(local(r"\\wsl$")));
+        assert_eq!(at("..", &local(r"\\wsl$\Ubuntu")), Some(local(r"\\wsl$")));
+        assert_eq!(at("Ubuntu", &local(r"\\wsl$")), Some(local(r"\\wsl$\Ubuntu")));
         assert!(ends_with_separator("sftp://h/x/ "));
         assert!(!ends_with_separator(r"C:\x"));
     }

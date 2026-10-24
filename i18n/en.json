@@ -108,6 +108,7 @@
   },
   "notice": {
     "read_only": "Archives are read-only",
+    "server_view": "The list of shares is only for navigating",
     "job_running": "Another operation is already running",
     "invalid_name": "Invalid name: “{name}”",
     "cannot_create": "Cannot create “{name}”: {error}",

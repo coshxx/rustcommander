@@ -52,7 +52,7 @@ impl App {
     /// Left click in the name column of `row`, which already had the cursor in the active panel.
     pub(crate) fn arm_rename(&mut self, panel: usize, row: usize, at: (f32, f32)) {
         let p = &self.panels[panel];
-        if p.archive.is_some() || p.entries.get(row).is_none_or(|e| e.kind == Kind::Parent) {
+        if p.archive.is_some() || p.dir.is_server() || p.entries.get(row).is_none_or(|e| e.kind == Kind::Parent) {
             return;
         }
         self.pending_rename = Some(PendingRename { panel, row, at });

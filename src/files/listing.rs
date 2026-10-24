@@ -7,15 +7,20 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::time::{Duration, Instant};
 
+use windows::Win32::Foundation::{ERROR_MORE_DATA, ERROR_NO_MORE_ITEMS, HANDLE, NO_ERROR};
+use windows::Win32::NetworkManagement::WNet::{
+    NETRESOURCEW, RESOURCE_GLOBALNET, RESOURCETYPE_DISK, WNET_OPEN_ENUM_USAGE, WNetCloseEnum, WNetEnumResourceW,
+    WNetOpenEnumW,
+};
 use windows::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_SYSTEM, FIND_FIRST_EX_LARGE_FETCH, FindClose,
     FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, FindNextFileW, GetFileAttributesW,
     INVALID_FILE_ATTRIBUTES, WIN32_FIND_DATAW,
 };
-use windows::core::PCWSTR;
+use windows::core::{PCWSTR, PWSTR};
 
 use crate::files::archive;
-use crate::files::location::Location;
+use crate::files::location::{Location, server_path, server_root};
 use crate::files::names::{natural_cmp, to_utf16_nul};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -181,6 +186,9 @@ pub fn load(path: &Location, cancel: &AtomicBool) -> Result<Listing, String> {
         Location::Local(p) => p,
         Location::Remote(r) => return crate::sftp::load(r, cancel),
     };
+    if let Some(server) = server_root(path) {
+        return load_shares(server, cancel);
+    }
     if let Some((archive, inner)) = archive::split(path) {
         return archive::load(path, archive, &inner, cancel);
     }
@@ -238,6 +246,80 @@ pub fn load(path: &Location, cancel: &AtomicBool) -> Result<Listing, String> {
     }
 
     Ok(Listing { dir: dir.into(), entries, select, dirs, files, bytes, elapsed: start.elapsed(), archive: None })
+}
+
+/// The shares of `\\server` as folders (the distributions on `\\wsl$`), the way Explorer lists
+/// them. Hidden `$` shares and printers are left out; there is nothing above a server, so no `..`.
+fn load_shares(server: &str, cancel: &AtomicBool) -> Result<Listing, String> {
+    let start = Instant::now();
+    let dir = server_path(server);
+    let mut remote = to_utf16_nul(dir.as_os_str());
+    let resource = NETRESOURCEW {
+        dwScope: RESOURCE_GLOBALNET,
+        dwType: RESOURCETYPE_DISK,
+        lpRemoteName: PWSTR(remote.as_mut_ptr()),
+        ..Default::default()
+    };
+    let mut handle = HANDLE::default();
+    let err = unsafe {
+        WNetOpenEnumW(RESOURCE_GLOBALNET, RESOURCETYPE_DISK, WNET_OPEN_ENUM_USAGE(0), Some(&resource), &mut handle)
+    };
+    if err != NO_ERROR {
+        return Err(windows::core::Error::from_hresult(err.to_hresult()).message());
+    }
+
+    // NETRESOURCEW records followed by their strings; u64 keeps the records aligned.
+    let mut buf = vec![0u64; 2048];
+    let mut entries = Vec::new();
+    let result = loop {
+        if cancel.load(AtomicOrdering::Relaxed) {
+            break Err("cancelled".into());
+        }
+        let (mut count, mut size) = (u32::MAX, (buf.len() * 8) as u32);
+        let err = unsafe { WNetEnumResourceW(handle, &mut count, buf.as_mut_ptr().cast(), &mut size) };
+        if err == ERROR_NO_MORE_ITEMS {
+            break Ok(());
+        }
+        if err == ERROR_MORE_DATA {
+            buf.resize((size as usize).div_ceil(8), 0);
+            continue;
+        }
+        if err != NO_ERROR {
+            break Err(windows::core::Error::from_hresult(err.to_hresult()).message());
+        }
+        let found = unsafe { std::slice::from_raw_parts(buf.as_ptr().cast::<NETRESOURCEW>(), count as usize) };
+        for r in found.iter().filter(|r| r.dwType == RESOURCETYPE_DISK && !r.lpRemoteName.is_null()) {
+            let full = unsafe { r.lpRemoteName.as_wide() };
+            let name = &full[full.iter().rposition(|&c| c == b'\\' as u16).map_or(0, |i| i + 1)..];
+            if !name.is_empty() && name.last() != Some(&(b'$' as u16)) {
+                entries.push(Entry {
+                    name: name.into(),
+                    kind: Kind::Dir,
+                    hidden: false,
+                    size: 0,
+                    mtime: 0,
+                    marked: false,
+                });
+            }
+        }
+    };
+    unsafe {
+        let _ = WNetCloseEnum(handle);
+    }
+    result?;
+
+    entries.sort_unstable_by(|a, b| natural_cmp(&a.name, &b.name));
+    let dirs = entries.len();
+    Ok(Listing {
+        dir: dir.into(),
+        entries,
+        select: None,
+        dirs,
+        files: 0,
+        bytes: 0,
+        elapsed: start.elapsed(),
+        archive: None,
+    })
 }
 
 /// A running load; `cancel` is set as soon as it is superseded.

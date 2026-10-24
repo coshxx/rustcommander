@@ -83,7 +83,7 @@ impl App {
             _ => return None,
         };
         let p = &self.panels[panel];
-        if p.archive.is_some() {
+        if p.archive.is_some() || p.dir.is_server() {
             return None;
         }
         // Not onto a server (yet).

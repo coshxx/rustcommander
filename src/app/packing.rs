@@ -50,6 +50,10 @@ impl App {
             self.notify(t("notice.pack_in_archive").into(), Tone::Info);
             return;
         }
+        if p.dir.is_server() {
+            self.notify(t("notice.server_view").into(), Tone::Info);
+            return;
+        }
         if p.is_remote() {
             self.notify(t("notice.remote_unsupported").into(), Tone::Info);
             return;
@@ -91,6 +95,10 @@ impl App {
         let p = &self.panels[a];
         if p.archive.is_some() {
             self.notify(t("notice.unpack_in_archive").into(), Tone::Info);
+            return;
+        }
+        if p.dir.is_server() {
+            self.notify(t("notice.server_view").into(), Tone::Info);
             return;
         }
         if p.is_remote() {

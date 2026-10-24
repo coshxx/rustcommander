@@ -481,6 +481,10 @@ impl App {
             self.notify(t("notice.no_context_menu").into(), Tone::Info);
             return;
         }
+        if p.dir.is_server() {
+            self.notify(t("notice.server_view").into(), Tone::Info);
+            return;
+        }
         let mut paths = p.local_targets();
         if let Some(dir) = p.dir.local().filter(|d| paths.is_empty() && !d.as_os_str().is_empty()) {
             paths.push(dir.to_path_buf());
