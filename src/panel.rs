@@ -9,6 +9,7 @@ use std::time::Instant;
 
 use crate::files::archive;
 use crate::files::dirsize::{self, DirSize};
+use crate::files::folder_kind::FolderKind;
 use crate::files::listing::{self, Entry, Kind, Listing, Loaded, Pending};
 use crate::files::location::Location;
 use crate::files::names::starts_with_ignore_case;
@@ -46,8 +47,8 @@ pub struct Panel {
     pub bytes: u64,
     /// Watches `dir` (or the directory holding the archive) for changes.
     pub watcher: Option<Watcher>,
-    /// The archive file if `dir` is inside one; such panels are read-only.
-    pub archive: Option<PathBuf>,
+    /// What sort of folder `dir` is (local, archive, server list, SFTP), and so what it allows.
+    pub kind: FolderKind,
     /// Folder sizes counted with Space / Alt+Shift+Enter, by folder name. Kept across automatic
     /// refreshes, dropped when leaving the directory or reloading by hand.
     pub sizes: HashMap<Box<[u16]>, Arc<DirSize>>,
@@ -80,13 +81,7 @@ pub enum Applied {
 impl Panel {
     /// The local folder shown, or inside an archive the folder holding it; `None` on a server.
     pub fn folder(&self) -> Option<&Path> {
-        let dir = self.dir.local()?;
-        Some(self.archive.as_deref().and_then(Path::parent).unwrap_or(dir))
-    }
-
-    /// The folder shown is on an SFTP server.
-    pub fn is_remote(&self) -> bool {
-        self.dir.is_remote()
+        self.kind.working_folder(&self.dir)
     }
 
     /// Load `path` in the background; `select` = entry to put the cursor on.
@@ -189,12 +184,14 @@ impl Panel {
                 self.dirs = l.dirs;
                 self.files = l.files;
                 self.bytes = l.bytes;
-                self.archive = l.archive;
+                self.kind = FolderKind::of_folder(&self.dir, l.archive);
                 self.error = None;
                 match &self.dir {
                     Location::Remote(r) => {
                         self.host_dirs.insert(r.host.clone(), r.clone());
                     }
+                    // A server list is no folder to come back to.
+                    Location::Local(_) if self.kind == FolderKind::Servers => {}
                     Location::Local(_) => {
                         let folder = self.folder().unwrap_or(Path::new("")).to_path_buf();
                         if let Some(d) = drive_letter(&folder) {
@@ -346,7 +343,7 @@ impl Panel {
         let Some(dir) = self.dir.local() else { return false };
         let path = dir.join(e.os_name());
         let notify = (sink.hwnd, WM_APP_SIZE);
-        let size = match self.archive.as_ref().and_then(|_| archive::split(&path)) {
+        let size = match self.kind.archive().and_then(|_| archive::split(&path)) {
             Some((file, inner)) => dirsize::start_in_archive(file, inner, notify),
             None => dirsize::start(&path, notify),
         };
@@ -563,7 +560,7 @@ mod tests {
     #[test]
     fn other_panel_in_an_archive() {
         let left = at(r"D:\");
-        let right = Panel { archive: Some(r"C:\dl\foo.zip".into()), ..at(r"C:\dl\foo.zip\sub") };
+        let right = Panel { kind: FolderKind::Archive(r"C:\dl\foo.zip".into()), ..at(r"C:\dl\foo.zip\sub") };
         assert_eq!(drive_target(&left, &right, b'C'), Some((r"C:\dl".into(), false)));
         // Both on C:: the archive's folder, unless already there.
         assert_eq!(drive_target(&at(r"C:\x"), &right, b'C'), Some((r"C:\dl".into(), false)));

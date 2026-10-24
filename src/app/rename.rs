@@ -10,6 +10,7 @@ use crate::app::format::{utf16, valid_name, valid_remote_name};
 use crate::app::layout::ROW_H;
 use crate::app::text_input::TextInput;
 use crate::app::{App, Mode, TIMER_RENAME, Tone};
+use crate::files::folder_kind::Action;
 use crate::files::listing::Kind;
 use crate::files::location::Location;
 use crate::i18n::{t, tf};
@@ -52,7 +53,7 @@ impl App {
     /// Left click in the name column of `row`, which already had the cursor in the active panel.
     pub(crate) fn arm_rename(&mut self, panel: usize, row: usize, at: (f32, f32)) {
         let p = &self.panels[panel];
-        if p.archive.is_some() || p.dir.is_server() || p.entries.get(row).is_none_or(|e| e.kind == Kind::Parent) {
+        if p.kind.allows(Action::InlineRename).is_err() || p.entries.get(row).is_none_or(|e| e.kind == Kind::Parent) {
             return;
         }
         self.pending_rename = Some(PendingRename { panel, row, at });

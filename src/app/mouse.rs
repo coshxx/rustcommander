@@ -5,6 +5,7 @@ use std::time::Instant;
 use crate::app::layout::{Hit, ROW_H};
 use crate::app::rename::double_click_ms;
 use crate::app::{App, Mode, TIMER_DRAG, TIMER_LONG_PRESS, WM_APP_DRAG};
+use crate::files::folder_kind::Action;
 use crate::files::listing::Kind;
 use crate::sys::win::{self, SendHwnd};
 
@@ -132,8 +133,7 @@ impl App {
                     }
                     let panel = &self.panels[p];
                     if matches!(self.mode, Mode::Normal)
-                        && panel.archive.is_none()
-                        && !panel.is_remote()
+                        && panel.kind.allows(Action::DragOut).is_ok()
                         && panel.entries[row].kind != Kind::Parent
                     {
                         self.drag = Some(Drag::Out { panel: p, row, at: (x, y) });

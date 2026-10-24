@@ -123,6 +123,7 @@
     "temp": "Temp folder: {error}",
     "pack_in_archive": "Packing only works outside archives",
     "unpack_in_archive": "Inside an archive, F5 extracts",
+    "archive_in_archive": "Archives inside archives can't be entered – Enter extracts and opens them",
     "no_archives": "No archives selected",
     "no_history": "No history",
     "no_history_matches": "No matches in the history",

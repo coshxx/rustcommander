@@ -11,6 +11,7 @@ use crate::app::text_input::TextInput;
 use crate::app::{App, Mode, Tone};
 use crate::config::PackSettings;
 use crate::files::archive::is_archive_name;
+use crate::files::folder_kind::{Action, FolderKind};
 use crate::files::location::Location;
 use crate::i18n::{t, tf};
 use crate::ops::Job;
@@ -28,13 +29,11 @@ fn with_extension(name: &str, format: Format) -> String {
 }
 
 impl App {
-    /// Where a dialog writes to by default: the other panel's folder, or this one if the other
-    /// shows an archive.
+    /// Where packing and unpacking write to by default (`default_target`, but not on a server).
     fn default_target_dir(&self) -> PathBuf {
-        let (this, other) = (&self.panels[self.active], &self.panels[self.active ^ 1]);
-        match other.dir.local().filter(|_| other.archive.is_none()) {
-            Some(dir) => dir.to_path_buf(),
-            None => this.dir.local().unwrap_or(&this.last_local).to_path_buf(),
+        match self.default_target() {
+            Location::Local(dir) => dir,
+            Location::Remote(_) => self.panels[self.active].last_local.clone(),
         }
     }
 
@@ -45,19 +44,10 @@ impl App {
             return;
         }
         let a = self.active;
+        if !self.check(a, Action::Pack) {
+            return;
+        }
         let p = &self.panels[a];
-        if p.archive.is_some() {
-            self.notify(t("notice.pack_in_archive").into(), Tone::Info);
-            return;
-        }
-        if p.dir.is_server() {
-            self.notify(t("notice.server_view").into(), Tone::Info);
-            return;
-        }
-        if p.is_remote() {
-            self.notify(t("notice.remote_unsupported").into(), Tone::Info);
-            return;
-        }
         let sources = p.local_targets();
         let name = match sources.as_slice() {
             [] => return,
@@ -92,19 +82,10 @@ impl App {
             return;
         }
         let a = self.active;
+        if !self.check(a, Action::Unpack) {
+            return;
+        }
         let p = &self.panels[a];
-        if p.archive.is_some() {
-            self.notify(t("notice.unpack_in_archive").into(), Tone::Info);
-            return;
-        }
-        if p.dir.is_server() {
-            self.notify(t("notice.server_view").into(), Tone::Info);
-            return;
-        }
-        if p.is_remote() {
-            self.notify(t("notice.remote_unsupported").into(), Tone::Info);
-            return;
-        }
         let targets = p.local_targets();
         if targets.is_empty() {
             return;
@@ -193,9 +174,10 @@ impl App {
         let input = d.input.as_ref().map(|i| i.string().trim().to_string()).unwrap_or_default();
         let Some(dest) = parse_path(&utf16(&input), &dir) else { return };
         let sources: Vec<PathBuf> = d.sources.iter().filter_map(|l| l.local().map(Path::to_path_buf)).collect();
-        if self.panels.iter().any(|p| p.archive.as_ref().is_some_and(|a| dest.starts_with(a))) {
-            self.notify(t("notice.read_only").into(), Tone::Info);
-            return;
+        // Pack names a new archive file, unpack the folder to write into.
+        let into = matches!(d.extra, Extra::Unpack { .. });
+        if let Err(r) = FolderKind::of_target(&Location::Local(dest.clone()), into).allows(Action::Target) {
+            return self.refuse(r);
         }
         let job = match d.extra {
             Extra::Pack { format, level } => {

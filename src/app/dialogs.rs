@@ -9,6 +9,7 @@ use crate::app::command_line;
 use crate::app::format::{describe, ends_with_separator, parse_location, utf16, valid_name, valid_remote_name};
 use crate::app::text_input::TextInput;
 use crate::app::{App, Mode, Tone};
+use crate::files::folder_kind::{Action, FolderKind};
 use crate::files::listing::Kind;
 use crate::files::location::Location;
 use crate::files::mask::Mask;
@@ -250,39 +251,34 @@ impl App {
             return;
         }
         let a = self.active;
-        if self.panels[a].dir.is_server() && !matches!(kind, DialogKind::Select { .. }) {
-            self.notify(t("notice.server_view").into(), Tone::Info);
-            return;
-        }
-        let remote = self.panels[a].is_remote();
-        // Archives are read-only: copying out of one extracts, everything that writes is refused.
-        let kind = match kind {
-            DialogKind::Copy if self.panels[a].archive.is_some() => DialogKind::Extract,
-            DialogKind::Move
-            | DialogKind::Delete { .. }
-            | DialogKind::Rename
-            | DialogKind::MkDir
-            | DialogKind::NewFile
-                if self.panels[a].archive.is_some() =>
-            {
-                self.notify(t("notice.read_only").into(), Tone::Info);
-                return;
-            }
-            DialogKind::NewFile if remote => {
-                self.notify(t("notice.remote_unsupported").into(), Tone::Info);
-                return;
-            }
-            // A server has no recycle bin.
-            DialogKind::Delete { .. } if remote => DialogKind::Delete { recycle: false },
+        let action = match kind {
+            DialogKind::Copy | DialogKind::Extract => Some(Action::Copy),
+            DialogKind::Move => Some(Action::Move),
+            DialogKind::Delete { .. } => Some(Action::Delete),
+            DialogKind::Rename => Some(Action::Rename),
+            DialogKind::MkDir => Some(Action::MkDir),
+            DialogKind::NewFile => Some(Action::NewFile),
             DialogKind::Pack => return self.open_pack(),
             DialogKind::Unpack => return self.open_unpack(),
+            DialogKind::Select { .. } | DialogKind::Disconnect => None,
+        };
+        if let Some(action) = action
+            && !self.check(a, action)
+        {
+            return;
+        }
+        let kind = match kind {
+            // Copying out of an archive extracts.
+            DialogKind::Copy if self.panels[a].kind.is_archive() => DialogKind::Extract,
+            // A server has no recycle bin.
+            DialogKind::Delete { .. } if self.panels[a].dir.is_remote() => DialogKind::Delete { recycle: false },
             _ => kind,
         };
         let p = &self.panels[a];
         let (sources, message, input) = match kind {
             DialogKind::Copy | DialogKind::Extract | DialogKind::Move => {
                 let sources = p.targets();
-                let (msg, input) = transfer_prompt(kind, &sources, &self.panels[a ^ 1].dir);
+                let (msg, input) = transfer_prompt(kind, &sources, &self.default_target());
                 (sources, msg, Some(input))
             }
             DialogKind::Delete { recycle } => {
@@ -358,14 +354,11 @@ impl App {
             | DialogKind::Disconnect => return,
             DialogKind::Copy | DialogKind::Extract | DialogKind::Move => {
                 let Some(dest) = parse_location(&utf16(&input), &dir) else { return };
-                let into_archive = dest.local().is_some_and(|dest| {
-                    self.panels.iter().any(|p| p.archive.as_ref().is_some_and(|a| dest.starts_with(a)))
-                });
-                if into_archive {
-                    self.notify(t("notice.read_only").into(), Tone::Info);
-                    return;
+                let into = ends_with_separator(&input);
+                if let Err(r) = FolderKind::of_target(&dest, into).allows(Action::Target) {
+                    return self.refuse(r);
                 }
-                match self.transfer_job(d.kind, d.sources, dest, ends_with_separator(&input)) {
+                match self.transfer_job(d.kind, d.sources, dest, into) {
                     Some(job) => job,
                     None => return,
                 }

@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use crate::app::dialogs::{Dialog, DialogKind, Extra, transfer_prompt};
 use crate::app::layout::Hit;
 use crate::app::{App, Mode};
+use crate::files::folder_kind::Action;
 use crate::files::listing::Kind;
 use crate::files::location::Location;
 use crate::files::names::fold_case;
@@ -83,10 +84,7 @@ impl App {
             _ => return None,
         };
         let p = &self.panels[panel];
-        if p.archive.is_some() || p.dir.is_server() {
-            return None;
-        }
-        // Not onto a server (yet).
+        p.kind.allows(Action::DropInto).ok()?;
         let dir = p.dir.local()?;
         let folder = row.and_then(|r| p.entries.get(r).filter(|e| e.kind == Kind::Dir).map(|e| (r, e.os_name())));
         let (row, dest) = match folder {

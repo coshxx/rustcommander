@@ -34,6 +34,7 @@ use crate::app::rename::{InlineRename, PendingRename};
 use crate::app::text_input::TextInput;
 use crate::config::{Config, Options, PackSettings};
 use crate::files::archive::is_archive_name;
+use crate::files::folder_kind::{Action, FolderKind, Refusal};
 use crate::files::listing::{Kind, Loaded};
 use crate::files::location::Location;
 use crate::files::sort::SortKey;
@@ -322,6 +323,36 @@ impl App {
         self.invalidate();
     }
 
+    /// Say why something can't be done.
+    pub(crate) fn refuse(&mut self, refusal: Refusal) {
+        self.notify(t(refusal.notice()).into(), Tone::Info);
+    }
+
+    /// Whether `action` is possible in the folder of `panel`; if not, says why.
+    pub(crate) fn check(&mut self, panel: usize, action: Action) -> bool {
+        match self.panels[panel].kind.allows(action) {
+            Ok(()) => true,
+            Err(r) => {
+                self.refuse(r);
+                false
+            }
+        }
+    }
+
+    /// Where a dialog writes to by default: the other panel's folder if it can take files,
+    /// else this panel's local folder (the one holding an archive), else the last local one.
+    pub(crate) fn default_target(&self) -> Location {
+        let (this, other) = (&self.panels[self.active], &self.panels[self.active ^ 1]);
+        if other.kind.allows(Action::Target).is_ok() {
+            return other.dir.clone();
+        }
+        let own = match this.kind {
+            FolderKind::Local | FolderKind::Archive(_) => this.folder(),
+            FolderKind::Servers | FolderKind::Remote => None,
+        };
+        Location::Local(own.unwrap_or(&this.last_local).to_path_buf())
+    }
+
     /// `WM_APP_LOADED`: take over finished directory loads.
     pub fn on_loaded(&mut self) {
         while let Ok(l) = self.loaded_rx.try_recv() {
@@ -410,16 +441,18 @@ impl App {
         let a = self.active;
         let p = &self.panels[a];
         let Some(e) = p.current() else { return };
-        let (kind, in_archive, is_archive) = (e.kind, p.archive.is_some(), is_archive_name(&e.name));
+        let (kind, in_archive, is_archive) = (e.kind, p.kind.is_archive(), is_archive_name(&e.name));
         let path = p.dir.join(e.os_name());
         match (kind, path) {
             (Kind::Parent, _) => self.panels[a].go_up(a, &self.sink),
             (Kind::Dir, path) => self.navigate(a, path, None),
-            (_, Location::Remote(_)) if is_archive && !shell => {
-                self.notify(t("notice.remote_unsupported").into(), Tone::Info)
+            // Inside an archive, an archive is a file to extract and open.
+            (_, path) if is_archive && !shell && !in_archive => {
+                if self.check(a, Action::EnterArchive) {
+                    self.navigate(a, path, None)
+                }
             }
             (_, path) if in_archive || path.is_remote() => self.extract_then(a, path, AfterJob::Open),
-            (_, path) if is_archive && !shell => self.navigate(a, path, None),
             (_, Location::Local(path)) => win::shell_open(path),
             (_, Location::Remote(_)) => {}
         }
@@ -432,7 +465,7 @@ impl App {
         let p = &self.panels[a];
         let Some(e) = p.current().filter(|e| e.kind != Kind::Parent && !e.is_dir()) else { return };
         match p.dir.join(e.os_name()) {
-            Location::Local(path) if p.archive.is_none() => self.request_view(path),
+            Location::Local(path) if !p.kind.is_archive() => self.request_view(path),
             path => self.extract_then(a, path, AfterJob::View),
         }
     }
@@ -442,15 +475,13 @@ impl App {
     pub(crate) fn edit_current(&mut self) {
         let p = &self.panels[self.active];
         let Some(e) = p.current().filter(|e| !e.is_dir()) else { return };
-        if p.archive.is_some() {
-            self.notify(t("notice.read_only").into(), Tone::Info);
+        let path = p.local_path(e);
+        if !self.check(self.active, Action::Edit) {
             return;
         }
-        let Some(path) = p.dir.local().map(|d| d.join(e.os_name())) else {
-            self.notify(t("notice.remote_unsupported").into(), Tone::Info);
-            return;
-        };
-        self.edit(&path);
+        if let Some(path) = path {
+            self.edit(&path);
+        }
     }
 
     /// Start the editor on `path`.
@@ -476,15 +507,10 @@ impl App {
     /// directory itself). `at` = mouse position; `None` = below the cursor row (keyboard).
     pub(crate) fn request_context_menu(&mut self, at: Option<(f32, f32)>) {
         let a = self.active;
+        if !self.check(a, Action::ContextMenu) {
+            return;
+        }
         let p = &mut self.panels[a];
-        if p.archive.is_some() || p.is_remote() {
-            self.notify(t("notice.no_context_menu").into(), Tone::Info);
-            return;
-        }
-        if p.dir.is_server() {
-            self.notify(t("notice.server_view").into(), Tone::Info);
-            return;
-        }
         let mut paths = p.local_targets();
         if let Some(dir) = p.dir.local().filter(|d| paths.is_empty() && !d.as_os_str().is_empty()) {
             paths.push(dir.to_path_buf());
@@ -513,10 +539,13 @@ impl App {
 
     /// Ctrl+PgDn: like Enter, but only for directories and archives.
     pub(crate) fn enter_current(&mut self) {
-        let p = &self.panels[self.active];
-        let enterable = p.current().is_some_and(|e| {
-            e.kind == Kind::Dir || (e.kind != Kind::Parent && p.archive.is_none() && is_archive_name(&e.name))
-        });
+        let a = self.active;
+        let Some(e) = self.panels[a].current() else { return };
+        let enterable = match e.kind {
+            Kind::Dir => true,
+            Kind::Parent => false,
+            _ => is_archive_name(&e.name) && self.check(a, Action::EnterArchive),
+        };
         if enterable {
             self.open_current(false);
         }

@@ -123,6 +123,7 @@
     "temp": "Temp-Ordner: {error}",
     "pack_in_archive": "Packen geht nur außerhalb von Archiven",
     "unpack_in_archive": "Im Archiv entpackt F5",
+    "archive_in_archive": "Archive in Archiven lassen sich nicht betreten – Enter entpackt und öffnet sie",
     "no_archives": "Keine Archive ausgewählt",
     "no_history": "Kein Verlauf",
     "no_history_matches": "Keine Treffer im Verlauf",

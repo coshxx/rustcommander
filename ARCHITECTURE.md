@@ -42,7 +42,7 @@ thread touches.
 | `app/format.rs` | Pure helpers: size/date formatting, name checks, path parsing. |
 | `ui/` | Drawing only – reads `App`, never changes it. `paint()` redraws the whole window. |
 | `panel.rs` | One file list: directory, entries, cursor, scroll position, marks, quick search. |
-| `files/` | Files, but not operations on them: listing directories (`listing`), file search (`find`), folder sizes and the shared directory reader `scan` (`dirsize`), sort order (`sort`, pure and tested), archives as read-only directories (`archive`), where a panel is (`location`: local or SFTP), UTF-16 names and natural sort (`names`), marking masks (`mask`), change notifications (`watch`), temp files for opening entries of archives and server files (`temp`). |
+| `files/` | Files, but not operations on them: listing directories (`listing`), file search (`find`), folder sizes and the shared directory reader `scan` (`dirsize`), sort order (`sort`, pure and tested), archives as read-only directories (`archive`), where a panel is (`location`: local or SFTP), what sort of folder that is and which actions it allows (`folder_kind`), UTF-16 names and natural sort (`names`), marking masks (`mask`), change notifications (`watch`), temp files for opening entries of archives and server files (`temp`). |
 | `sftp/` | SFTP over Windows' `ssh.exe`: the protocol (`proto`, pure and tested), one connection (`session`: the ssh process, request/reply routing, pipelined transfers), remote paths (`path`), and in `mod.rs` the connection pool, listing remote folders and the hosts of `~/.ssh/config`. |
 | `ops/` | File operations on a worker thread: `copy`, `moving`, `delete`, `extract` (from archives), `pack` (into a new zip/7z, unpacking whole archives), `remote` (upload, download and operations on an SFTP server); `mod.rs` holds the public API (`Job`, `Handle`, `Event`) and the shared worker logic. |
 | `lister/` | The F3 viewer: its own windows (`window`), state and commands (`mod.rs`), input, drawing, the byte → screen line logic (`text`, pure and tested) and the search (`search`). |
@@ -81,8 +81,10 @@ refresh, notice timeout, delayed progress card, drag auto-repeat.
 A path like `C:\x\fotos.zip\urlaub` is an ordinary panel path. `files::listing::load` notices
 the archive part (`files::archive::split`) and lists from the archive's table of contents
 instead, which `files::archive::index` reads once with libarchive and caches. The `Listing`
-carries the archive path; a panel with `archive` set is read-only, so `app/dialogs.rs` turns F5
-into `Job::Extract` and refuses everything that would write. Extraction is one sequential pass
+carries the archive path, and the panel's `FolderKind` becomes `Archive`: read-only, so
+`app/dialogs.rs` turns F5 into `Job::Extract` and `FolderKind::allows` refuses everything that
+would write. A typed target is classified by its path (`FolderKind::of_target`), so a copy into
+any archive is refused, shown in a panel or not. Extraction is one sequential pass
 over the archive (`ops/extract.rs`); entry paths go through `archive::clean_path`, which rejects
 anything that could leave the destination. Alt+F9 unpacks whole archives the same way
 (`ops/pack.rs`, `Job::Unpack`). Alt+F5 writes a new archive through `sys::libarchive::Writer`
@@ -93,8 +95,13 @@ write error the writer is marked failed (no trailer is written) and the file del
 
 A panel's folder is a `files::location::Location`: `Local(PathBuf)` (archives included) or
 `Remote(RemotePath)` (`sftp://host/path`). Code that needs the local file system asks for
-`local()` and gets `None` on a server, so a remote path never reaches `std::fs`; features that
-don't work remotely show a notice. `files::listing::load` hands remote paths to `sftp::load`,
+`local()` and gets `None` on a server, so a remote path never reaches `std::fs`.
+
+What a panel's folder allows is decided in one place: `files::folder_kind`. A panel's `kind` is
+`Local`, `Archive`, `Servers` (`\\server`, only for navigating) or `Remote`; commands ask
+`App::check(panel, Action::…)`, which shows the `Refusal`'s notice, and gestures (dragging,
+dropping, inline rename) ask `kind.allows(…)` and silently don't start. See
+[ADR 0001](docs/adr/0001-folder-kind-beside-location.md). `files::listing::load` hands remote paths to `sftp::load`,
 operations become `Job::Upload`, `Download`, `RemoteMove`, … (`ops/remote.rs`).
 
 `sftp::session(host)` returns the shared connection, connecting first if needed (blocking, so

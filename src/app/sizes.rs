@@ -3,6 +3,7 @@
 //! numbers. Also the sort order, which can depend on counted sizes.
 
 use crate::app::{App, TIMER_SIZES};
+use crate::files::folder_kind::Action;
 use crate::files::sort::SortKey;
 use crate::sys::win;
 
@@ -26,6 +27,9 @@ impl App {
 
     /// Alt+Shift+Enter: count every folder of the active panel.
     pub(crate) fn count_all_sizes(&mut self) {
+        if !self.check(self.active, Action::CountSizes) {
+            return;
+        }
         self.panels[self.active].count_all_sizes(&self.sink);
         self.arm_sizes_timer();
     }

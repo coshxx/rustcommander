@@ -12,8 +12,9 @@ use crate::app::format::{parse_location, parse_path, utf16};
 use crate::app::text_input::TextInput;
 use crate::app::{App, Tone};
 use crate::config::history;
+use crate::files::folder_kind::Action;
 use crate::files::listing::Kind;
-use crate::i18n::{t, tf};
+use crate::i18n::tf;
 use crate::sftp::RemotePath;
 
 /// `CREATE_NEW_CONSOLE`: the command gets its own console window.
@@ -194,10 +195,10 @@ impl App {
     /// `cmd /c` (or `/k`) in a new console, in the active panel's folder (for an archive: the
     /// folder holding it).
     fn run_external(&mut self, line: &str, keep_open: bool) -> bool {
-        let Some(cwd) = self.panels[self.active].folder().map(Path::to_path_buf) else {
-            self.notify(t("notice.remote_unsupported").into(), Tone::Info);
+        if !self.check(self.active, Action::RunCommand) {
             return false;
-        };
+        }
+        let Some(cwd) = self.panels[self.active].folder().map(Path::to_path_buf) else { return false };
         let flag = if keep_open { "/k" } else { "/c" };
         let spawned = Command::new("cmd.exe")
             .raw_arg(format!("{flag} {line}"))

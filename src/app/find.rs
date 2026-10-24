@@ -10,10 +10,11 @@ use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use crate::app::format::{parse_path, utf16};
 use crate::app::layout::ROW_H;
 use crate::app::text_input::TextInput;
-use crate::app::{App, Mode, TIMER_FIND, Tone, WM_APP_FIND};
+use crate::app::{App, Mode, TIMER_FIND, WM_APP_FIND};
 use crate::files::find::{self, Hit, Query, Search};
+use crate::files::folder_kind::Action;
 use crate::files::names::natural_cmp;
-use crate::i18n::{t, tf};
+use crate::i18n::tf;
 use crate::sys::win::{self, SendHwnd};
 
 /// Translation keys of the input fields' labels, in order.
@@ -122,16 +123,15 @@ impl App {
     /// Alt+F7: show the search dialog (with the last search, if any).
     pub(crate) fn open_find(&mut self) {
         let a = self.active;
-        let p = &mut self.panels[a];
-        p.search.clear();
+        self.panels[a].search.clear();
         match &mut self.find {
             Some(f) => f.focus = if f.hits.is_empty() { 0 } else { LIST },
             None => {
-                // Inside an archive: search the folder holding it. Not on a server.
-                let Some(dir) = p.folder() else {
-                    self.notify(t("notice.remote_unsupported").into(), Tone::Info);
+                if !self.check(a, Action::Find) {
                     return;
-                };
+                }
+                // Inside an archive: search the folder holding it.
+                let Some(dir) = self.panels[a].folder() else { return };
                 self.find = Some(Find::new(dir));
             }
         }
